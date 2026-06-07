@@ -1,2 +1,1 @@
-"""Local event gate for PNU public notice feed consumers."""
-
+"""Local agent tools for PNU public notice feed consumers."""

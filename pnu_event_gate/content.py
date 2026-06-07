@@ -14,7 +14,7 @@ from typing import Any
 from .events import now_iso
 
 
-DEFAULT_CACHE_DIR = Path(".event-gate-cache/materials")
+DEFAULT_CACHE_DIR = Path(".pnu-notice-cache/materials")
 DEFAULT_MAX_TEXT_CHARS = 12000
 DEFAULT_MAX_FILE_BYTES = 10_000_000
 DEFAULT_MAX_TOTAL_BYTES = 30_000_000

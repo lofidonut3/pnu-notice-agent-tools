@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pnu-notice-event-gate"
+name = "pnu-notice-agent-tools"
 version = "0.1.0"
-description = "Local cursor helper for PNU Public Notice Feed events.json"
+description = "Local agent tools for PNU Public Notice Feed events"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -15,6 +15,7 @@ authors = [
 dependencies = []
 
 [project.scripts]
+pnu-notice = "pnu_event_gate.cli:main"
 pnu-event-gate = "pnu_event_gate.cli:main"
 
 [project.optional-dependencies]
@@ -24,4 +25,3 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["pnu_event_gate*"]
-

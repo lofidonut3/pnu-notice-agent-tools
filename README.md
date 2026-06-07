@@ -1,13 +1,15 @@
-# PNU Notice Event Gate
+# PNU Notice Agent Tools
 
-PNU Notice Event Gate is a small local cursor helper for consuming
+PNU Notice Agent Tools is a small local CLI package for consuming
 [`pnu-public-notice-feed`](https://github.com/lofidonut3/pnu-public-notice-feed)
-`events.json`.
+`events.json` and materializing selected official notice materials.
 
 It is not a real-time notification server and it does not crawl PNU websites
-directly. When run by cron, an agent runtime, or another automation process, it
-reads `events.json`, selects only events after the local cursor, and prints a
-JSON batch to stdout. If there are no new events, it exits quietly.
+for feed generation. When run by cron, an agent runtime, or another automation
+process, `check` reads `events.json`, selects only events after the local cursor,
+and prints a JSON batch to stdout. If there are no new events, it exits quietly.
+When an agent needs official materials for one selected notice, `resolve` can
+fetch the official detail page and requested attachments into a local cache.
 
 This project and `pnu-public-notice-feed` are unofficial projects. They are not
 operated by Pusan National University.
@@ -18,11 +20,11 @@ operated by Pusan National University.
 pnu-public-notice-feed
   -> publishes public notice metadata as events.json
 
-pnu-notice-event-gate
-  -> prints only events after the local cursor
-  -> enriches compact events from monthly archive metadata
-  -> collapses same-notice duplicate groups
-  -> can materialize one selected notice's official page and attachments locally
+pnu-notice-agent-tools
+  -> check prints only events after the local cursor
+  -> check enriches compact events from monthly archive metadata
+  -> check collapses same-notice duplicate groups
+  -> resolve can materialize one selected notice's official page and attachments locally
   -> does not call an LLM
   -> does not decide notice relevance
   -> does not persist or mirror full notice bodies or attachment contents
@@ -36,6 +38,23 @@ AI agent / automation
 
 The goal is to let deterministic code reduce the feed to a small event batch
 before an agent or automation step handles it.
+
+## Intended UX Flow
+
+```text
+1. A scheduler or agent runtime runs `pnu-notice check`.
+2. If stdout is empty, there are no new events and the run stops.
+3. If new events are printed, the agent compares them with the user's watch request.
+4. For a selected notice, the agent runs `pnu-notice resolve`.
+5. `resolve` saves the official detail page and requested attachments locally.
+6. A model or separate reader skill reads the local materials when needed.
+7. After successful handling, the agent runs `pnu-notice ack`.
+```
+
+This package covers the deterministic local tool layer: cursoring, event
+selection, official material fetching, cache metadata, and acking. It does not
+store user watch requests, run the LLM relevance judgment, parse HWP/PDF/XLSX
+attachment contents, or send notifications.
 
 `events.json` events are compact routing records. By default, this helper follows
 each event's `archive_file` and `archive_item_id` fields to enrich the output
@@ -169,7 +188,7 @@ python3 run.py check --no-dedupe --pretty
 
 `resolve` outputs a materials manifest, not a parsed content bundle.
 
-Resolve one selected event from an event-gate payload:
+Resolve one selected event from a `pnu-notice check` payload:
 
 ```bash
 python3 run.py resolve --event-json selected-event.json --pretty
@@ -208,7 +227,7 @@ The target output is a JSON materials manifest:
   },
   "detail": {
     "url": "https://www.pusan.ac.kr/...",
-    "local_path": ".event-gate-cache/materials/pnu-main-notice-1500000/detail.html",
+    "local_path": ".pnu-notice-cache/materials/pnu-main-notice-1500000/detail.html",
     "media_type": "text/html",
     "bytes": 48291,
     "sha256": "...",
@@ -220,7 +239,7 @@ The target output is a JSON materials manifest:
       "index": 0,
       "name": "attachment.hwp",
       "url": "https://www.pusan.ac.kr/...",
-      "local_path": ".event-gate-cache/materials/pnu-main-notice-1500000/attachments/00.hwp",
+      "local_path": ".pnu-notice-cache/materials/pnu-main-notice-1500000/attachments/00.hwp",
       "file_extension": "hwp",
       "media_type": "application/x-hwp",
       "bytes": 79360,
@@ -323,21 +342,23 @@ python3 run.py check --event-type added
 Default state file:
 
 ```text
-.event-gate-state.json
+.pnu-notice-state.json
 ```
 
 Use a custom state file:
 
 ```bash
-python3 run.py check --state ~/.pnu-agent/event-gate-state.json
+python3 run.py check --state ~/.pnu-agent/pnu-notice-state.json
 ```
 
 ## Install Locally
 
 ```bash
 python3 -m pip install -e .
-pnu-event-gate check --pretty
+pnu-notice check --pretty
 ```
+
+The legacy `pnu-event-gate` command is kept as a compatibility alias.
 
 ## Test
 

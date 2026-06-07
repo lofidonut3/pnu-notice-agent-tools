@@ -32,7 +32,7 @@ from .events import (
 from .state import Cursor, EventGateState
 
 
-DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".event-gate-state.json"
+DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".pnu-notice-state.json"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Gate PNU public notice feed events for local AI agents.",
+        description="Check and materialize PNU public notice feed events for local AI agents.",
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = False
@@ -127,7 +127,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     resolve.add_argument(
         "--event-json",
-        help="Path to one event JSON object, an event-gate payload, or '-' for stdin.",
+        help="Path to one event JSON object, a pnu-notice check payload, or '-' for stdin.",
     )
     resolve.add_argument(
         "--event-index",
@@ -193,7 +193,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--state",
         default=str(DEFAULT_STATE_PATH),
-        help="Path to local event-gate state JSON.",
+        help="Path to local pnu-notice state JSON.",
     )
 
 

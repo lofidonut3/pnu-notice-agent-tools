@@ -6,15 +6,15 @@ Date: 2026-06-07
 
 ## Context
 
-`pnu-notice-event-gate` is a small local cursor helper. Its `check` command
-should stay simple: read `events.json`, select events after the local cursor,
-optionally apply explicit source/topic/type filters, collapse duplicates, enrich
-from public archive metadata, and print a deterministic JSON batch.
+`pnu-notice-agent-tools` is a small local CLI package for PNU notice agents. Its
+`check` command should stay simple: read `events.json`, select events after the
+local cursor, optionally apply explicit source/topic/type filters, collapse
+duplicates, enrich from public archive metadata, and print a deterministic JSON
+batch.
 
-The personal agent still makes the relevance decision. `event-gate` should not
-add keyword search, semantic filtering, or "smart" output minimization to
-`check`, because those features can create false negatives before the agent sees
-the event.
+The personal agent still makes the relevance decision. `check` should not add
+keyword search, semantic filtering, or "smart" output minimization, because
+those features can create false negatives before the agent sees the event.
 
 For selected notices, the agent needs official materials: the official detail
 page and, often more importantly, the official attachments. Many PNU notices put
@@ -32,7 +32,7 @@ hwpx: 2
 ```
 
 This makes HWP, PDF, XLSX, and HWPX important reading targets, but reading them
-does not have to be `event-gate`'s core responsibility.
+does not have to be this package's core responsibility.
 
 ## Decision
 
@@ -84,7 +84,7 @@ For attachments:
 - Download original attachment files only when requested.
 - Preserve original attachment name, source URL, detected extension/media type,
   local path, byte size, SHA-256, and fetch status.
-- Do not parse attachment contents in core `event-gate`.
+- Do not parse attachment contents in core `resolve`.
 - Do not send attachments to external parser services.
 
 Recommended default behavior:
@@ -118,7 +118,7 @@ The target output should be a materials manifest, not a content bundle:
   },
   "detail": {
     "url": "https://www.pusan.ac.kr/...",
-    "local_path": ".event-gate-cache/materials/pnu-main-notice-1500000/detail.html",
+    "local_path": ".pnu-notice-cache/materials/pnu-main-notice-1500000/detail.html",
     "media_type": "text/html",
     "bytes": 48291,
     "sha256": "...",
@@ -130,7 +130,7 @@ The target output should be a materials manifest, not a content bundle:
       "index": 0,
       "name": "모집요강.hwp",
       "url": "https://www.pusan.ac.kr/...",
-      "local_path": ".event-gate-cache/materials/pnu-main-notice-1500000/attachments/00.hwp",
+      "local_path": ".pnu-notice-cache/materials/pnu-main-notice-1500000/attachments/00.hwp",
       "file_extension": "hwp",
       "media_type": "application/x-hwp",
       "bytes": 79360,
@@ -179,13 +179,13 @@ Codex / Claude Code / local agent
   - Consider pyhwp, Apache Tika, or OpenHWP as optional alternatives.
 ```
 
-This keeps `event-gate` small and deterministic while still allowing stronger
+This keeps the core CLI small and deterministic while still allowing stronger
 document reading in environments that support it.
 
 ## LibreOffice/Soffice Position
 
 LibreOffice/soffice is a good practical local backend for HWP reading, but it
-should not be a required dependency of `event-gate`.
+should not be a required dependency of the base package.
 
 Local benchmark on 2026-06-07 with recent PNU HWP samples and LibreOffice
 24.2.7.2:
@@ -234,7 +234,7 @@ publish mirrored full notice bodies or attachment files.
 
 Benefits:
 
-- `event-gate` stays small, deterministic, and dependency-light.
+- The base package stays small, deterministic, and dependency-light.
 - The tool reliably obtains official materials and preserves provenance.
 - Student workflows can use Gemini, ChatGPT, Claude, Codex, or local tools
   according to what each surface supports.
@@ -255,7 +255,7 @@ The current `resolve` implementation follows this materials-oriented shape:
 ```text
 1. pnu_event_gate/content.py writes detail pages and requested attachments to a local cache.
 2. The manifest includes local paths, source URLs, byte sizes, SHA-256 hashes, media types, and fetch statuses.
-3. Attachment text extraction is not part of event-gate core.
+3. Attachment text extraction is not part of core `resolve`.
 4. Detail pages may include a lightweight visible-text preview.
 5. Tests assert local materialization instead of attachment text extraction.
 ```
