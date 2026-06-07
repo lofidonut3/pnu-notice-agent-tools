@@ -22,14 +22,16 @@ pnu-notice-event-gate
   -> prints only events after the local cursor
   -> enriches compact events from monthly archive metadata
   -> collapses same-notice duplicate groups
+  -> can materialize one selected notice's official page and attachments locally
   -> does not call an LLM
   -> does not decide notice relevance
-  -> does not fetch full notice bodies or attachment contents
+  -> does not persist or mirror full notice bodies or attachment contents
   -> does not provide push delivery
 
 AI agent / automation
   -> compares the event batch against user-defined criteria
-  -> fetches official notice pages or attachments when needed
+  -> asks this tool to fetch official notice materials when needed
+  -> reads fetched materials directly or through a separate reader skill
 ```
 
 The goal is to let deterministic code reduce the feed to a small event batch
@@ -39,6 +41,14 @@ before an agent or automation step handles it.
 each event's `archive_file` and `archive_item_id` fields to enrich the output
 with preview text, attachment metadata, and content access metadata from the
 public monthly archive.
+
+The resolver direction is documented in
+[docs/content-resolver-decision.md](docs/content-resolver-decision.md). In
+short: `check` stays simple, while `resolve` should become an on-demand
+materials fetcher. It should fetch the official detail page and selected
+attachments into a local cache, then print a manifest with paths, source URLs,
+sizes, hashes, media types, and fetch statuses. Reading HWP/PDF/XLSX/HWPX
+contents belongs in a separate reader skill or agent workflow.
 
 ## Run
 
@@ -154,6 +164,85 @@ To print every matching event:
 ```bash
 python3 run.py check --no-dedupe --pretty
 ```
+
+## Resolve Official Materials
+
+`resolve` outputs a materials manifest, not a parsed content bundle.
+
+Resolve one selected event from an event-gate payload:
+
+```bash
+python3 run.py resolve --event-json selected-event.json --pretty
+```
+
+Resolve the second event from a `check` payload that contains an `events` array:
+
+```bash
+python3 run.py resolve --event-json payload.json --event-index 1 --pretty
+```
+
+Resolve a direct official notice URL:
+
+```bash
+python3 run.py resolve --url "https://www.pusan.ac.kr/..." --pretty
+```
+
+Download original attachments as local materials when needed:
+
+```bash
+python3 run.py resolve --event-json selected-event.json --download-attachments --pretty
+```
+
+The target output is a JSON materials manifest:
+
+```json
+{
+  "type": "pnu_notice_materials",
+  "resolved_at": "2026-06-07T12:00:00+09:00",
+  "notice": {
+    "event_id": "event-id",
+    "notice_id": "pnu-main-notice:1500000",
+    "source_id": "pnu-main-notice",
+    "title": "Notice title",
+    "detail_url": "https://www.pusan.ac.kr/..."
+  },
+  "detail": {
+    "url": "https://www.pusan.ac.kr/...",
+    "local_path": ".event-gate-cache/materials/pnu-main-notice-1500000/detail.html",
+    "media_type": "text/html",
+    "bytes": 48291,
+    "sha256": "...",
+    "fetch_status": "ok",
+    "text_preview": "Optional short visible text preview..."
+  },
+  "attachments": [
+    {
+      "index": 0,
+      "name": "attachment.hwp",
+      "url": "https://www.pusan.ac.kr/...",
+      "local_path": ".event-gate-cache/materials/pnu-main-notice-1500000/attachments/00.hwp",
+      "file_extension": "hwp",
+      "media_type": "application/x-hwp",
+      "bytes": 79360,
+      "sha256": "...",
+      "fetch_status": "ok"
+    }
+  ],
+  "limits": {
+    "max_file_bytes": 10000000,
+    "max_total_bytes": 30000000
+  },
+  "warnings": []
+}
+```
+
+`resolve` fetches and records official local materials; it does not parse HWP,
+PDF, XLSX, or HWPX attachments and it does not decide whether the notice matches
+a user request. Attachment reading belongs in a separate reader skill or agent
+workflow that consumes the manifest. When given an event payload, it should use
+the payload's attachment metadata. When given only `--url`, it should fetch the
+official detail page and derive candidate attachment links from that page when
+possible.
 
 ## Cursor Policy
 

@@ -6,6 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .content import (
+    DEFAULT_CACHE_DIR,
+    DEFAULT_MAX_FILE_BYTES,
+    DEFAULT_MAX_TEXT_CHARS,
+    DEFAULT_MAX_TOTAL_BYTES,
+    build_direct_notice,
+    load_notice_input,
+    resolve_notice_materials,
+)
 from .events import (
     DEFAULT_EVENTS_URL,
     apply_filters,
@@ -29,12 +38,14 @@ DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".event-gate-state.js
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if not raw_args or raw_args[0] not in {"check", "ack", "-h", "--help"}:
+    if not raw_args or raw_args[0] not in {"check", "ack", "resolve", "-h", "--help"}:
         raw_args = ["check", *raw_args]
     args = parser.parse_args(raw_args)
 
     if args.command == "ack":
         return _ack(args)
+    if args.command == "resolve":
+        return _resolve(args)
     return _check(args)
 
 
@@ -109,6 +120,67 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_args(ack)
     ack.add_argument("--event-id", required=True, help="Last successfully handled event id.")
     ack.add_argument("--seen-at", help="seen_at timestamp for the acked event.")
+
+    resolve = subparsers.add_parser(
+        "resolve",
+        help="Fetch official notice materials for a selected event or URL.",
+    )
+    resolve.add_argument(
+        "--event-json",
+        help="Path to one event JSON object, an event-gate payload, or '-' for stdin.",
+    )
+    resolve.add_argument(
+        "--event-index",
+        type=int,
+        default=0,
+        help="Event index to use when --event-json contains an events array.",
+    )
+    resolve.add_argument(
+        "--url",
+        help="Official detail URL to resolve directly or override the event detail URL.",
+    )
+    resolve.add_argument(
+        "--download-attachments",
+        dest="download_attachments",
+        action="store_true",
+        help="Download original attachment files into the local materials cache.",
+    )
+    resolve.add_argument(
+        "--fetch-attachments",
+        dest="download_attachments",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    resolve.add_argument(
+        "--cache-dir",
+        default=str(DEFAULT_CACHE_DIR),
+        help="Directory for resolved official materials.",
+    )
+    resolve.add_argument(
+        "--max-text-chars",
+        type=int,
+        default=DEFAULT_MAX_TEXT_CHARS,
+        help="Maximum visible text preview characters for the detail page.",
+    )
+    resolve.add_argument(
+        "--max-file-bytes",
+        type=int,
+        default=DEFAULT_MAX_FILE_BYTES,
+        help="Maximum bytes to fetch for the detail page or one attachment.",
+    )
+    resolve.add_argument(
+        "--max-attachment-bytes",
+        type=int,
+        dest="max_file_bytes",
+        help=argparse.SUPPRESS,
+    )
+    resolve.add_argument(
+        "--max-total-bytes",
+        type=int,
+        default=DEFAULT_MAX_TOTAL_BYTES,
+        help="Maximum total bytes to fetch for one resolved notice.",
+    )
+    resolve.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
     return parser
 
 
@@ -235,6 +307,28 @@ def _ack(args: argparse.Namespace) -> int:
         acked_at=checked_at,
     )
     state.save()
+    return 0
+
+
+def _resolve(args: argparse.Namespace) -> int:
+    if not args.event_json and not args.url:
+        raise SystemExit("resolve requires --event-json or --url")
+
+    notice = (
+        load_notice_input(args.event_json, args.event_index)
+        if args.event_json
+        else build_direct_notice(args.url)
+    )
+    payload = resolve_notice_materials(
+        notice,
+        override_url=args.url,
+        download_attachments=args.download_attachments,
+        cache_dir=Path(args.cache_dir),
+        max_text_chars=args.max_text_chars,
+        max_file_bytes=args.max_file_bytes,
+        max_total_bytes=args.max_total_bytes,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
     return 0
 
 
