@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .backtest import run_backtest
 from .content import (
     DEFAULT_CACHE_DIR,
     DEFAULT_MAX_FILE_BYTES,
@@ -29,16 +30,35 @@ from .events import (
     select_new_events,
     validate_feed,
 )
+from .matcher import match_event
+from .profiles import load_profile
+from .scan import run_scan
 from .state import Cursor, EventGateState
+from .store import NoticeStore
 
 
 DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".pnu-notice-state.json"
+DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / ".pnu-notice-state.sqlite3"
+COMMANDS = {
+    "check",
+    "ack",
+    "resolve",
+    "scan",
+    "profile",
+    "candidate",
+    "status",
+    "match",
+    "backtest",
+    "receipt",
+    "-h",
+    "--help",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if not raw_args or raw_args[0] not in {"check", "ack", "resolve", "-h", "--help"}:
+    if not raw_args or raw_args[0] not in COMMANDS:
         raw_args = ["check", *raw_args]
     args = parser.parse_args(raw_args)
 
@@ -46,6 +66,20 @@ def main(argv: list[str] | None = None) -> int:
         return _ack(args)
     if args.command == "resolve":
         return _resolve(args)
+    if args.command == "scan":
+        return _scan(args)
+    if args.command == "profile":
+        return _profile(args)
+    if args.command == "candidate":
+        return _candidate(args)
+    if args.command == "status":
+        return _status(args)
+    if args.command == "match":
+        return _match(args)
+    if args.command == "backtest":
+        return _backtest(args)
+    if args.command == "receipt":
+        return _receipt(args)
     return _check(args)
 
 
@@ -116,10 +150,80 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
+    scan = subparsers.add_parser("scan", help="Scan feed events, match active profiles, and enqueue candidates.")
+    scan.add_argument(
+        "--events-url",
+        default=DEFAULT_EVENTS_URL,
+        help="events.json URL, file:// URL, or local path.",
+    )
+    _add_db_arg(scan)
+    scan.add_argument(
+        "--include-baseline",
+        action="store_true",
+        help="Scan current feed events on the first run instead of only setting a baseline.",
+    )
+    scan.add_argument("--limit", type=int, help="Maximum events to scan.")
+    scan.add_argument(
+        "--no-archive",
+        action="store_true",
+        help="Do not fetch monthly archive files to enrich event metadata.",
+    )
+    scan.add_argument(
+        "--no-archive-catchup",
+        action="store_true",
+        help="Do not use monthly archive files when the local cursor is older than events.json.",
+    )
+    scan.add_argument(
+        "--no-dedupe",
+        action="store_true",
+        help="Do not collapse same-notice duplicate groups.",
+    )
+    scan.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
     ack = subparsers.add_parser("ack", help="Advance cursor after downstream handling succeeds.")
     _add_common_args(ack)
     ack.add_argument("--event-id", required=True, help="Last successfully handled event id.")
     ack.add_argument("--seen-at", help="seen_at timestamp for the acked event.")
+
+    profile = subparsers.add_parser("profile", help="Manage compiled watch profiles.")
+    profile_subparsers = profile.add_subparsers(dest="profile_command")
+    profile_subparsers.required = True
+    profile_upsert = profile_subparsers.add_parser("upsert", help="Insert or update a watch profile.")
+    _add_db_arg(profile_upsert)
+    profile_upsert.add_argument("--profile-json", required=True, help="Profile JSON path or '-' for stdin.")
+    profile_upsert.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    profile_list = profile_subparsers.add_parser("list", help="List watch profiles.")
+    _add_db_arg(profile_list)
+    profile_list.add_argument("--include-disabled", action="store_true", help="Include disabled profiles.")
+    profile_list.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    profile_disable = profile_subparsers.add_parser("disable", help="Disable an active watch profile.")
+    _add_db_arg(profile_disable)
+    profile_disable.add_argument("--watch-id", required=True, help="Watch profile id to disable.")
+    profile_disable.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    profile_export = profile_subparsers.add_parser("export", help="Export a stored watch profile.")
+    _add_db_arg(profile_export)
+    profile_export.add_argument("--watch-id", required=True, help="Watch profile id to export.")
+    profile_export.add_argument("--revision", help="Profile revision to export. Defaults to the active revision.")
+    profile_export.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    match = subparsers.add_parser("match", help="Match one event against one compiled watch profile.")
+    match.add_argument("--profile-json", required=True, help="Profile JSON path or '-' for stdin.")
+    match.add_argument("--event-json", required=True, help="Event JSON path or '-' for stdin.")
+    match.add_argument("--explain", action="store_true", help="Include deterministic match reasons.")
+    match.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    backtest = subparsers.add_parser("backtest", help="Replay one profile against archive metadata.")
+    backtest.add_argument("--profile-json", required=True, help="Profile JSON path or '-' for stdin.")
+    backtest.add_argument(
+        "--archive-json",
+        action="append",
+        required=True,
+        help="Archive JSON path. Can be repeated.",
+    )
+    backtest.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     resolve = subparsers.add_parser(
         "resolve",
@@ -139,6 +243,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--url",
         help="Official detail URL to resolve directly or override the event detail URL.",
     )
+    resolve.add_argument(
+        "--candidate-id",
+        help="Resolve a queued candidate by id from the SQLite state database.",
+    )
+    _add_db_arg(resolve)
     resolve.add_argument(
         "--download-attachments",
         dest="download_attachments",
@@ -181,6 +290,52 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum total bytes to fetch for one resolved notice.",
     )
     resolve.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    candidate = subparsers.add_parser("candidate", help="Inspect or update queued candidates.")
+    candidate_subparsers = candidate.add_subparsers(dest="candidate_command")
+    candidate_subparsers.required = True
+
+    candidate_list = candidate_subparsers.add_parser("list", help="List queued candidates.")
+    _add_db_arg(candidate_list)
+    candidate_list.add_argument("--status", help="Filter by candidate status.")
+    candidate_list.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    candidate_show = candidate_subparsers.add_parser("show", help="Show one queued candidate.")
+    _add_db_arg(candidate_show)
+    candidate_show.add_argument("--candidate-id", required=True, help="Candidate id to show.")
+    candidate_show.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    candidate_complete = candidate_subparsers.add_parser("complete", help="Mark a candidate completed.")
+    _add_db_arg(candidate_complete)
+    candidate_complete.add_argument("--candidate-id", required=True, help="Candidate id to complete.")
+    candidate_complete.add_argument("--result-json", help="Result JSON path, inline JSON, or '-' for stdin.")
+    candidate_complete.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    candidate_fail = candidate_subparsers.add_parser("fail", help="Mark a candidate failed.")
+    _add_db_arg(candidate_fail)
+    candidate_fail.add_argument("--candidate-id", required=True, help="Candidate id to fail.")
+    failure_kind = candidate_fail.add_mutually_exclusive_group(required=True)
+    failure_kind.add_argument("--retryable", action="store_true", help="Mark as retryable failure.")
+    failure_kind.add_argument("--terminal", action="store_true", help="Mark as terminal failure.")
+    failure_kind.add_argument("--needs-attention", action="store_true", help="Mark as needing user attention.")
+    candidate_fail.add_argument("--reason", required=True, help="Failure reason.")
+    candidate_fail.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    status = subparsers.add_parser("status", help="Print local scan/profile/candidate status.")
+    _add_db_arg(status)
+    status.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    receipt = subparsers.add_parser("receipt", help="Record notification receipts.")
+    receipt_subparsers = receipt.add_subparsers(dest="receipt_command")
+    receipt_subparsers.required = True
+    receipt_record = receipt_subparsers.add_parser("record", help="Record a sent notification receipt.")
+    _add_db_arg(receipt_record)
+    receipt_record.add_argument("--receipt-id", required=True)
+    receipt_record.add_argument("--candidate-id", required=True)
+    receipt_record.add_argument("--channel")
+    receipt_record.add_argument("--payload-hash")
+    receipt_record.add_argument("--status", default="sent")
+    receipt_record.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
     return parser
 
 
@@ -194,6 +349,14 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--state",
         default=str(DEFAULT_STATE_PATH),
         help="Path to local pnu-notice state JSON.",
+    )
+
+
+def _add_db_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--db",
+        default=str(DEFAULT_DB_PATH),
+        help="Path to local pnu-notice SQLite state database.",
     )
 
 
@@ -310,15 +473,191 @@ def _ack(args: argparse.Namespace) -> int:
     return 0
 
 
+def _scan(args: argparse.Namespace) -> int:
+    with NoticeStore(Path(args.db)) as store:
+        payload = run_scan(
+            store=store,
+            events_url=args.events_url,
+            include_baseline=args.include_baseline,
+            no_archive=args.no_archive,
+            no_archive_catchup=args.no_archive_catchup,
+            no_dedupe=args.no_dedupe,
+            limit=args.limit,
+        )
+    if payload is None:
+        return 0
+    _print_json(payload, pretty=args.pretty)
+    return 0
+
+
+def _profile(args: argparse.Namespace) -> int:
+    checked_at = now_iso()
+    with NoticeStore(Path(args.db)) as store:
+        if args.profile_command == "upsert":
+            profile = load_profile(args.profile_json)
+            payload = {
+                "type": "pnu_notice_profile",
+                **store.upsert_profile(profile, now=checked_at),
+            }
+            store.commit()
+            _print_json(payload, pretty=args.pretty)
+            return 0
+        if args.profile_command == "list":
+            payload = {
+                "type": "pnu_notice_profiles",
+                "profiles": store.list_profiles(include_disabled=args.include_disabled),
+            }
+            _print_json(payload, pretty=args.pretty)
+            return 0
+        if args.profile_command == "disable":
+            disabled_count = store.disable_profile(args.watch_id, now=checked_at)
+            store.commit()
+            _print_json(
+                {
+                    "type": "pnu_notice_profile_disabled",
+                    "watch_id": args.watch_id,
+                    "disabled_count": disabled_count,
+                },
+                pretty=args.pretty,
+            )
+            return 0
+        if args.profile_command == "export":
+            profile = store.get_profile(args.watch_id, args.revision)
+            _print_json(profile["profile"], pretty=args.pretty)
+            return 0
+    raise SystemExit(f"unknown profile command: {args.profile_command}")
+
+
+def _candidate(args: argparse.Namespace) -> int:
+    checked_at = now_iso()
+    with NoticeStore(Path(args.db)) as store:
+        if args.candidate_command == "list":
+            payload = {
+                "type": "pnu_notice_candidate_list",
+                "candidates": store.list_candidates(status=args.status),
+            }
+            _print_json(payload, pretty=args.pretty)
+            return 0
+        if args.candidate_command == "show":
+            _print_json(store.get_candidate(args.candidate_id), pretty=args.pretty)
+            return 0
+        if args.candidate_command == "complete":
+            result = _load_optional_json(args.result_json) or {}
+            payload = store.update_candidate(
+                args.candidate_id,
+                status="completed",
+                now=checked_at,
+                result=result,
+            )
+            store.commit()
+            _print_json(payload, pretty=args.pretty)
+            return 0
+        if args.candidate_command == "fail":
+            status = (
+                "failed_retryable"
+                if args.retryable
+                else "failed_terminal"
+                if args.terminal
+                else "needs_attention"
+            )
+            payload = store.update_candidate(
+                args.candidate_id,
+                status=status,
+                now=checked_at,
+                error=args.reason,
+                increment_attempts=True,
+            )
+            store.commit()
+            _print_json(payload, pretty=args.pretty)
+            return 0
+    raise SystemExit(f"unknown candidate command: {args.candidate_command}")
+
+
+def _status(args: argparse.Namespace) -> int:
+    with NoticeStore(Path(args.db)) as store:
+        _print_json(store.status_summary(), pretty=args.pretty)
+    return 0
+
+
+def _match(args: argparse.Namespace) -> int:
+    profile = load_profile(args.profile_json)
+    event = _load_json(args.event_json)
+    if isinstance(event, dict) and isinstance(event.get("events"), list):
+        event = event["events"][0] if event["events"] else {}
+    if not isinstance(event, dict):
+        raise SystemExit("match requires an event JSON object")
+    result = match_event(profile, event)
+    payload = {
+        "type": "pnu_notice_match_explain",
+        "matched": result.matched,
+        "suppressed": result.suppressed,
+        "score": result.score,
+        "threshold": result.threshold,
+        "action": result.action,
+        "matched_reasons": result.matched_reasons if args.explain else {},
+    }
+    _print_json(payload, pretty=args.pretty)
+    return 0
+
+
+def _backtest(args: argparse.Namespace) -> int:
+    profile = load_profile(args.profile_json)
+    archives = [_load_json(path) for path in args.archive_json]
+    if not all(isinstance(archive, dict) for archive in archives):
+        raise SystemExit("backtest requires archive JSON objects")
+    _print_json(run_backtest(profile, archives), pretty=args.pretty)
+    return 0
+
+
+def _receipt(args: argparse.Namespace) -> int:
+    checked_at = now_iso()
+    with NoticeStore(Path(args.db)) as store:
+        if args.receipt_command == "record":
+            candidate = store.get_candidate(args.candidate_id)
+            receipt = {
+                "receipt_id": args.receipt_id,
+                "candidate_id": args.candidate_id,
+                "watch_id": candidate["watch_id"],
+                "event_id": candidate["event_id"],
+                "channel": args.channel,
+                "payload_hash": args.payload_hash,
+                "status": args.status,
+                "created_at": checked_at,
+                "sent_at": checked_at if args.status == "sent" else None,
+                "metadata": {},
+            }
+            inserted = store.record_receipt(receipt)
+            store.commit()
+            _print_json(
+                {
+                    "type": "pnu_notice_receipt",
+                    "inserted": inserted,
+                    **receipt,
+                },
+                pretty=args.pretty,
+            )
+            return 0
+    raise SystemExit(f"unknown receipt command: {args.receipt_command}")
+
+
 def _resolve(args: argparse.Namespace) -> int:
-    if not args.event_json and not args.url:
+    if not args.event_json and not args.url and not args.candidate_id:
         raise SystemExit("resolve requires --event-json or --url")
 
-    notice = (
-        load_notice_input(args.event_json, args.event_index)
-        if args.event_json
-        else build_direct_notice(args.url)
-    )
+    store: NoticeStore | None = None
+    candidate: dict[str, Any] | None = None
+    if args.candidate_id:
+        store = NoticeStore(Path(args.db))
+        candidate = store.get_candidate(args.candidate_id)
+        notice = candidate["event"]
+        store.update_candidate(args.candidate_id, status="resolving", now=now_iso())
+        store.commit()
+    else:
+        notice = (
+            load_notice_input(args.event_json, args.event_index)
+            if args.event_json
+            else build_direct_notice(args.url)
+        )
     payload = resolve_notice_materials(
         notice,
         override_url=args.url,
@@ -328,7 +667,16 @@ def _resolve(args: argparse.Namespace) -> int:
         max_file_bytes=args.max_file_bytes,
         max_total_bytes=args.max_total_bytes,
     )
-    print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
+    if store is not None and candidate is not None:
+        store.update_candidate(
+            candidate["candidate_id"],
+            status="resolved",
+            now=now_iso(),
+            materials=payload,
+        )
+        store.commit()
+        store.close()
+    _print_json(payload, pretty=args.pretty)
     return 0
 
 
@@ -371,6 +719,39 @@ def _build_payload(
         },
         "events": selected_events if args.full else [compact_event(event) for event in selected_events],
     }
+
+
+def _load_optional_json(value: str | None) -> Any:
+    if not value:
+        return None
+    return _load_json(value)
+
+
+def _load_json(value: str) -> Any:
+    if value == "-":
+        raw = sys.stdin.read()
+        return json.loads(raw)
+
+    candidate = value.strip()
+    if candidate.startswith(("{", "[")):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    try:
+        raw = (
+            Path(value).read_text(encoding="utf-8")
+            if Path(value).exists()
+            else value
+        )
+    except OSError:
+        raw = value
+    return json.loads(raw)
+
+
+def _print_json(payload: Any, *, pretty: bool) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2 if pretty else None))
 
 
 if __name__ == "__main__":

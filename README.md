@@ -1,8 +1,9 @@
 # PNU Notice Agent Tools
 
-PNU Notice Agent Tools is a small local CLI package for consuming
+PNU Notice Agent Tools is a local CLI package for consuming
 [`pnu-public-notice-feed`](https://github.com/lofidonut3/pnu-public-notice-feed)
-`events.json` and materializing selected official notice materials.
+`events.json`, scanning it against compiled watch profiles, queueing candidate
+notices for an agent, and materializing selected official notice materials.
 
 It is not a real-time notification server and it does not crawl PNU websites
 for feed generation. When run by cron, an agent runtime, or another automation
@@ -10,6 +11,8 @@ process, `check` reads `events.json`, selects only events after the local cursor
 and prints a JSON batch to stdout. If there are no new events, it exits quietly.
 When an agent needs official materials for one selected notice, `resolve` can
 fetch the official detail page and requested attachments into a local cache.
+The `scan` command compares checked events with precompiled watch profiles
+before an agent is invoked.
 
 This project and `pnu-public-notice-feed` are unofficial projects. They are not
 operated by Pusan National University.
@@ -22,16 +25,19 @@ pnu-public-notice-feed
 
 pnu-notice-agent-tools
   -> check prints only events after the local cursor
+  -> scan matches new events against stored watch profiles before waking an agent
   -> check enriches compact events from monthly archive metadata
   -> check collapses same-notice duplicate groups
+  -> queues matched candidates durably in local SQLite state
   -> resolve can materialize one selected notice's official page and attachments locally
   -> does not call an LLM
-  -> does not decide notice relevance
+  -> does not perform final semantic relevance judgment
   -> does not persist or mirror full notice bodies or attachment contents
   -> does not provide push delivery
 
 AI agent / automation
-  -> compares the event batch against user-defined criteria
+  -> compiles natural-language watch requests into watch profiles
+  -> invokes the candidate gate before waking expensive reader/model steps
   -> asks this tool to fetch official notice materials when needed
   -> reads fetched materials directly or through a separate reader skill
 ```
@@ -42,19 +48,20 @@ before an agent or automation step handles it.
 ## Intended UX Flow
 
 ```text
-1. A scheduler or agent runtime runs `pnu-notice check`.
-2. If stdout is empty, there are no new events and the run stops.
-3. If new events are printed, the agent compares them with the user's watch request.
-4. For a selected notice, the agent runs `pnu-notice resolve`.
+1. A scheduler or lightweight wrapper runs `pnu-notice scan`.
+2. If stdout is empty, no candidate needs agent work and the run stops.
+3. If candidates are printed, the wrapper invokes the agent.
+4. The agent runs `pnu-notice resolve --candidate-id ...` for selected notices.
 5. `resolve` saves the official detail page and requested attachments locally.
 6. A model or separate reader skill reads the local materials when needed.
-7. After successful handling, the agent runs `pnu-notice ack`.
+7. After successful handling, the agent runs `pnu-notice candidate complete`.
 ```
 
 This package covers the deterministic local tool layer: cursoring, event
-selection, official material fetching, cache metadata, and acking. It does not
-store user watch requests, run the LLM relevance judgment, parse HWP/PDF/XLSX
-attachment contents, or send notifications.
+selection, candidate matching, official material fetching, cache metadata, and
+acking. It does not compile natural-language watch requests, run the LLM final
+relevance judgment, parse HWP/PDF/XLSX attachment contents, or send
+notifications.
 
 `events.json` events are compact routing records. By default, this helper follows
 each event's `archive_file` and `archive_item_id` fields to enrich the output
@@ -68,6 +75,53 @@ materials fetcher. It should fetch the official detail page and selected
 attachments into a local cache, then print a manifest with paths, source URLs,
 sizes, hashes, media types, and fetch statuses. Reading HWP/PDF/XLSX/HWPX
 contents belongs in a separate reader skill or agent workflow.
+
+The candidate gate direction is documented in
+[docs/watch-profile-matcher-decision.md](docs/watch-profile-matcher-decision.md).
+In short: natural-language watch requests should be compiled into deterministic
+watch profiles when they are created or edited. Cron runs should use those
+profiles to cheaply decide whether any checked event deserves agent attention.
+
+The local state direction is documented in
+[docs/local-alerting-state-decision.md](docs/local-alerting-state-decision.md).
+In short: `scan` keeps a scan cursor and durable candidate queue in local
+SQLite state, so unrelated notices stay quiet while matched candidates survive
+until resolve, reading, and notification handling completes.
+
+The lower-level `check` and `match` commands remain useful for debugging and
+composition.
+
+## Scan Runtime Flow
+
+Store a compiled watch profile:
+
+```bash
+python3 run.py profile upsert --profile-json watch.json
+```
+
+Run the quiet cron-facing scan:
+
+```bash
+python3 run.py scan
+```
+
+If no candidate matches, stdout is empty and the scan cursor still advances.
+If candidates match, stdout contains a `pnu_notice_candidates` payload and the
+candidates are stored in the local SQLite queue.
+
+Inspect local state:
+
+```bash
+python3 run.py status --pretty
+python3 run.py candidate list --status pending --pretty
+```
+
+Resolve and complete a candidate:
+
+```bash
+python3 run.py resolve --candidate-id cand_... --download-attachments --pretty
+python3 run.py candidate complete --candidate-id cand_... --result-json result.json
+```
 
 ## Run
 

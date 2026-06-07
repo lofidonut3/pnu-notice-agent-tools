@@ -12,9 +12,12 @@ local cursor, optionally apply explicit source/topic/type filters, collapse
 duplicates, enrich from public archive metadata, and print a deterministic JSON
 batch.
 
-The personal agent still makes the relevance decision. `check` should not add
-keyword search, semantic filtering, or "smart" output minimization, because
-those features can create false negatives before the agent sees the event.
+The personal agent still makes the final relevance decision. `check` should not
+add keyword search, semantic filtering, or "smart" output minimization, because
+those features can create false negatives before the event leaves the cursor
+step. A deterministic candidate gate can be added as a separate command/layer
+after `check`; that direction is documented in
+`docs/watch-profile-matcher-decision.md`.
 
 For selected notices, the agent needs official materials: the official detail
 page and, often more importantly, the official attachments. Many PNU notices put

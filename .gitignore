@@ -1,4 +1,9 @@
 .event-gate-state.json
+.pnu-notice-state.json
+.pnu-notice-state.sqlite3
+.pnu-notice-state.sqlite3-*
+.event-gate-cache/
+.pnu-notice-cache/
 __pycache__/
 .pytest_cache/
 *.egg-info/
