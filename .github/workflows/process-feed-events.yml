@@ -53,10 +53,17 @@ jobs:
         run: python -m pip install -e ".[analysis,worker]"
 
       - name: Validate runtime configuration
+        id: runtime
         run: |
-          test -n "$PNU_DATABASE_URL" || { echo "PNU_DATABASE_URL is required"; exit 1; }
+          if [[ -z "$PNU_DATABASE_URL" ]]; then
+            echo "::warning::PNU_DATABASE_URL is not configured; watch processing is skipped."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Process feed cursor and outbox
+        if: steps.runtime.outputs.configured == 'true'
         shell: bash
         run: |
           args=()
