@@ -1,0 +1,73 @@
+name: Process PNU notice events
+
+on:
+  repository_dispatch:
+    types: [pnu-feed-updated]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      include_baseline:
+        description: "Process the current event window on first initialization"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pnu-notice-watch-runtime
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PNU_DATABASE_URL: ${{ secrets.PNU_DATABASE_URL }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      PNU_EMAIL_TO: ${{ secrets.PNU_EMAIL_TO }}
+      PNU_SMTP_HOST: ${{ secrets.PNU_SMTP_HOST }}
+      PNU_SMTP_PORT: ${{ vars.PNU_SMTP_PORT || '587' }}
+      PNU_SMTP_FROM: ${{ secrets.PNU_SMTP_FROM }}
+      PNU_SMTP_USERNAME: ${{ secrets.PNU_SMTP_USERNAME }}
+      PNU_SMTP_PASSWORD: ${{ secrets.PNU_SMTP_PASSWORD }}
+      PNU_SMTP_STARTTLS: ${{ vars.PNU_SMTP_STARTTLS || 'true' }}
+      EVENTS_URL: ${{ github.event.client_payload.events_url || 'https://lofidonut3.github.io/pnu-public-notice-feed/events.json' }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install local OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor
+
+      - name: Install worker
+        run: python -m pip install -e ".[analysis,worker]"
+
+      - name: Validate runtime configuration
+        run: |
+          test -n "$PNU_DATABASE_URL" || { echo "PNU_DATABASE_URL is required"; exit 1; }
+
+      - name: Process feed cursor and outbox
+        shell: bash
+        run: |
+          args=()
+          if [[ "${{ inputs.include_baseline || false }}" == "true" ]]; then
+            args+=(--include-baseline)
+          fi
+          python run.py run-watch-cycle \
+            --db "$PNU_DATABASE_URL" \
+            --events-url "$EVENTS_URL" \
+            --process-limit 20 \
+            --send-limit 20 \
+            --max-attempts 5 \
+            --pretty \
+            "${args[@]}"

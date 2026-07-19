@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from .backtest import run_backtest
+from .analysis import (
+    DEFAULT_MAX_VISUAL_PAGES,
+    compile_watch_request,
+    intent_to_profile,
+    run_ai_analysis,
+)
 from .content import (
     DEFAULT_CACHE_DIR,
     DEFAULT_MAX_FILE_BYTES,
@@ -16,6 +23,7 @@ from .content import (
     load_notice_input,
     resolve_notice_materials,
 )
+from .delivery import SMTPConfig, send_email
 from .events import (
     DEFAULT_EVENTS_URL,
     apply_filters,
@@ -30,11 +38,14 @@ from .events import (
     select_new_events,
     validate_feed,
 )
+from .evidence import evidence_from_materials, load_evidence_json
 from .matcher import match_event
-from .profiles import load_profile
+from .nvidia import DEFAULT_CHAT_MODEL, DEFAULT_EMBEDDING_MODEL, NvidiaClient
+from .profiles import load_profile, normalize_profile
 from .scan import run_scan
 from .state import Cursor, EventGateState
 from .store import NoticeStore
+from .worker import run_watch_cycle
 
 
 DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".pnu-notice-state.json"
@@ -43,7 +54,9 @@ COMMANDS = {
     "check",
     "ack",
     "resolve",
+    "analyze",
     "scan",
+    "run-watch-cycle",
     "profile",
     "candidate",
     "status",
@@ -66,8 +79,12 @@ def main(argv: list[str] | None = None) -> int:
         return _ack(args)
     if args.command == "resolve":
         return _resolve(args)
+    if args.command == "analyze":
+        return _analyze(args)
     if args.command == "scan":
         return _scan(args)
+    if args.command == "run-watch-cycle":
+        return _run_watch_cycle(args)
     if args.command == "profile":
         return _profile(args)
     if args.command == "candidate":
@@ -180,6 +197,29 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
+    cycle = subparsers.add_parser(
+        "run-watch-cycle",
+        help="Scan, process candidates, queue notifications, and deliver due outbox items.",
+    )
+    cycle.add_argument("--events-url", default=DEFAULT_EVENTS_URL)
+    _add_db_arg(cycle)
+    cycle.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
+    cycle.add_argument("--include-baseline", action="store_true")
+    cycle.add_argument("--process-limit", type=int, default=20)
+    cycle.add_argument("--send-limit", type=int, default=20)
+    cycle.add_argument("--max-attempts", type=int, default=5)
+    cycle.add_argument("--no-embeddings", action="store_true")
+    cycle.add_argument("--max-visual-pages", type=int, default=DEFAULT_MAX_VISUAL_PAGES)
+    cycle.add_argument("--api-key-env", default="NVIDIA_API_KEY")
+    cycle.add_argument("--email-to", default=os.environ.get("PNU_EMAIL_TO"))
+    cycle.add_argument("--smtp-env-prefix", default="PNU_SMTP_")
+    cycle.add_argument(
+        "--no-send",
+        action="store_true",
+        help="Keep due notifications queued without making SMTP calls.",
+    )
+    cycle.add_argument("--pretty", action="store_true")
+
     ack = subparsers.add_parser("ack", help="Advance cursor after downstream handling succeeds.")
     _add_common_args(ack)
     ack.add_argument("--event-id", required=True, help="Last successfully handled event id.")
@@ -192,6 +232,33 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_db_arg(profile_upsert)
     profile_upsert.add_argument("--profile-json", required=True, help="Profile JSON path or '-' for stdin.")
     profile_upsert.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    profile_compile = profile_subparsers.add_parser(
+        "compile",
+        help="Compile a natural-language request into a deterministic watch profile with NVIDIA.",
+    )
+    _add_db_arg(profile_compile)
+    profile_compile.add_argument("--watch-id", required=True)
+    profile_compile.add_argument("--revision", default="1")
+    profile_request = profile_compile.add_mutually_exclusive_group(required=True)
+    profile_request.add_argument("--request")
+    profile_request.add_argument("--request-file")
+    profile_compile.add_argument(
+        "--chat-model",
+        default=os.environ.get("NVIDIA_CHAT_MODEL", DEFAULT_CHAT_MODEL),
+    )
+    profile_compile.add_argument("--api-key-env", default="NVIDIA_API_KEY")
+    profile_compile.add_argument("--candidate-threshold", type=int, default=2)
+    profile_compile.add_argument(
+        "--email-to",
+        help="Recipient stored in this watch profile for matched notifications.",
+    )
+    profile_compile.add_argument(
+        "--store",
+        action="store_true",
+        help="Store and activate the compiled profile in the SQLite state database.",
+    )
+    profile_compile.add_argument("--pretty", action="store_true")
 
     profile_list = profile_subparsers.add_parser("list", help="List watch profiles.")
     _add_db_arg(profile_list)
@@ -261,6 +328,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     resolve.add_argument(
+        "--download-relevant-attachments",
+        action="store_true",
+        help="Download attachments selected conservatively from the watch request and filenames.",
+    )
+    resolve.add_argument(
+        "--watch-request",
+        help="Natural-language watch request used by --download-relevant-attachments.",
+    )
+    resolve.add_argument(
+        "--attachment-index",
+        action="append",
+        type=int,
+        default=[],
+        help="Download one attachment index from the resolved manifest. Can be repeated.",
+    )
+    resolve.add_argument(
         "--cache-dir",
         default=str(DEFAULT_CACHE_DIR),
         help="Directory for resolved official materials.",
@@ -290,6 +373,85 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum total bytes to fetch for one resolved notice.",
     )
     resolve.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    analyze = subparsers.add_parser(
+        "analyze",
+        help="Analyze extracted notice evidence with NVIDIA hosted models.",
+    )
+    request_input = analyze.add_mutually_exclusive_group(required=True)
+    request_input.add_argument("--request", help="Natural-language watch request.")
+    request_input.add_argument("--request-file", help="UTF-8 file containing the watch request.")
+    request_input.add_argument(
+        "--watch-profile-json",
+        help="Stored watch profile JSON containing request and compiled_intent.",
+    )
+    request_input.add_argument(
+        "--watch-id",
+        help="Load the active compiled watch profile from the SQLite state database.",
+    )
+    analyze.add_argument(
+        "--revision",
+        help="Optional stored watch profile revision to use with --watch-id.",
+    )
+    _add_db_arg(analyze)
+    evidence_input = analyze.add_mutually_exclusive_group(required=True)
+    evidence_input.add_argument(
+        "--materials-json",
+        help="Resolve manifest JSON whose local materials should be extracted.",
+    )
+    evidence_input.add_argument(
+        "--evidence-json",
+        help="Pre-extracted evidence bundle JSON.",
+    )
+    analyze.add_argument("--notice-json", help="Optional notice metadata JSON.")
+    analyze.add_argument(
+        "--chat-model",
+        default=os.environ.get("NVIDIA_CHAT_MODEL", DEFAULT_CHAT_MODEL),
+        help="NVIDIA catalog chat model id.",
+    )
+    analyze.add_argument(
+        "--embedding-model",
+        default=os.environ.get("NVIDIA_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+        help="NVIDIA catalog embedding model id.",
+    )
+    analyze.add_argument(
+        "--api-key-env",
+        default="NVIDIA_API_KEY",
+        help="Environment variable containing the NVIDIA API key.",
+    )
+    analyze.add_argument(
+        "--no-embeddings",
+        action="store_true",
+        help="Use lexical retrieval only before the final model call.",
+    )
+    analyze.add_argument("--lexical-pool-size", type=int, default=40)
+    analyze.add_argument("--top-k", type=int, default=12)
+    analyze.add_argument(
+        "--max-visual-pages",
+        type=int,
+        default=DEFAULT_MAX_VISUAL_PAGES,
+        help="Maximum image/PDF pages to transcribe with the multimodal endpoint.",
+    )
+    analyze.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Extract and print evidence without calling NVIDIA endpoints.",
+    )
+    analyze.add_argument(
+        "--email-to",
+        help="Send matched output as a plain-text email using PNU_SMTP_* environment variables.",
+    )
+    analyze.add_argument(
+        "--email-uncertain",
+        action="store_true",
+        help="Also send uncertain analyses for manual review.",
+    )
+    analyze.add_argument(
+        "--smtp-env-prefix",
+        default="PNU_SMTP_",
+        help="Prefix for HOST, PORT, FROM, USERNAME, PASSWORD, and STARTTLS variables.",
+    )
+    analyze.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     candidate = subparsers.add_parser("candidate", help="Inspect or update queued candidates.")
     candidate_subparsers = candidate.add_subparsers(dest="candidate_command")
@@ -355,8 +517,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 def _add_db_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--db",
-        default=str(DEFAULT_DB_PATH),
-        help="Path to local pnu-notice SQLite state database.",
+        default=os.environ.get("PNU_DATABASE_URL", str(DEFAULT_DB_PATH)),
+        help="SQLite path or Postgres connection URL (defaults to PNU_DATABASE_URL when set).",
     )
 
 
@@ -474,7 +636,7 @@ def _ack(args: argparse.Namespace) -> int:
 
 
 def _scan(args: argparse.Namespace) -> int:
-    with NoticeStore(Path(args.db)) as store:
+    with NoticeStore(args.db) as store:
         payload = run_scan(
             store=store,
             events_url=args.events_url,
@@ -490,9 +652,82 @@ def _scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_watch_cycle(args: argparse.Namespace) -> int:
+    if args.max_attempts <= 0:
+        raise SystemExit("--max-attempts must be greater than zero")
+    if args.max_visual_pages < 0:
+        raise SystemExit("--max-visual-pages must not be negative")
+
+    smtp_config: SMTPConfig | None = None
+
+    def client_factory() -> NvidiaClient:
+        return NvidiaClient.from_env(args.api_key_env)
+
+    def sender(recipient: str, content: dict[str, Any]) -> dict[str, Any]:
+        nonlocal smtp_config
+        if smtp_config is None:
+            smtp_config = SMTPConfig.from_env(args.smtp_env_prefix)
+        return send_email(config=smtp_config, recipient=recipient, content=content)
+
+    with NoticeStore(args.db) as store:
+        payload = run_watch_cycle(
+            store=store,
+            events_url=args.events_url,
+            cache_dir=Path(args.cache_dir),
+            client_factory=client_factory,
+            notification_sender=None if args.no_send else sender,
+            default_email_to=args.email_to,
+            include_baseline=args.include_baseline,
+            process_limit=args.process_limit,
+            send_limit=args.send_limit,
+            max_attempts=args.max_attempts,
+            use_embeddings=not args.no_embeddings,
+            max_visual_pages=args.max_visual_pages,
+        )
+    _print_json(payload, pretty=args.pretty)
+    return 0
+
+
 def _profile(args: argparse.Namespace) -> int:
     checked_at = now_iso()
-    with NoticeStore(Path(args.db)) as store:
+    if args.profile_command == "compile":
+        if args.candidate_threshold <= 0:
+            raise SystemExit("--candidate-threshold must be greater than zero")
+        request = (
+            args.request.strip()
+            if args.request is not None
+            else Path(args.request_file).read_text(encoding="utf-8").strip()
+        )
+        if not request:
+            raise SystemExit("watch request must not be empty")
+        client = NvidiaClient.from_env(args.api_key_env)
+        intent = compile_watch_request(client, request=request, model=args.chat_model)
+        profile = normalize_profile(
+            intent_to_profile(
+                intent,
+                watch_id=args.watch_id,
+                revision=args.revision,
+                candidate_threshold=args.candidate_threshold,
+            )
+        )
+        if args.email_to:
+            profile["delivery"] = {"email_to": args.email_to}
+        payload: dict[str, Any] = {
+            "type": "pnu_notice_profile_compilation",
+            "provider": "nvidia",
+            "model": args.chat_model,
+            "stored": False,
+            "profile": profile,
+        }
+        if args.store:
+            with NoticeStore(args.db) as store:
+                payload["stored_profile"] = store.upsert_profile(profile, now=checked_at)
+                store.commit()
+            payload["stored"] = True
+        _print_json(payload, pretty=args.pretty)
+        return 0
+
+    with NoticeStore(args.db) as store:
         if args.profile_command == "upsert":
             profile = load_profile(args.profile_json)
             payload = {
@@ -530,7 +765,7 @@ def _profile(args: argparse.Namespace) -> int:
 
 def _candidate(args: argparse.Namespace) -> int:
     checked_at = now_iso()
-    with NoticeStore(Path(args.db)) as store:
+    with NoticeStore(args.db) as store:
         if args.candidate_command == "list":
             payload = {
                 "type": "pnu_notice_candidate_list",
@@ -574,7 +809,7 @@ def _candidate(args: argparse.Namespace) -> int:
 
 
 def _status(args: argparse.Namespace) -> int:
-    with NoticeStore(Path(args.db)) as store:
+    with NoticeStore(args.db) as store:
         _print_json(store.status_summary(), pretty=args.pretty)
     return 0
 
@@ -611,7 +846,7 @@ def _backtest(args: argparse.Namespace) -> int:
 
 def _receipt(args: argparse.Namespace) -> int:
     checked_at = now_iso()
-    with NoticeStore(Path(args.db)) as store:
+    with NoticeStore(args.db) as store:
         if args.receipt_command == "record":
             candidate = store.get_candidate(args.candidate_id)
             receipt = {
@@ -647,7 +882,7 @@ def _resolve(args: argparse.Namespace) -> int:
     store: NoticeStore | None = None
     candidate: dict[str, Any] | None = None
     if args.candidate_id:
-        store = NoticeStore(Path(args.db))
+        store = NoticeStore(args.db)
         candidate = store.get_candidate(args.candidate_id)
         notice = candidate["event"]
         store.update_candidate(args.candidate_id, status="resolving", now=now_iso())
@@ -658,6 +893,30 @@ def _resolve(args: argparse.Namespace) -> int:
             if args.event_json
             else build_direct_notice(args.url)
         )
+    selected_indices = set(args.attachment_index)
+    selected_modes = sum(
+        [
+            bool(args.download_attachments),
+            bool(args.download_relevant_attachments),
+            bool(selected_indices),
+        ]
+    )
+    if selected_modes > 1:
+        raise SystemExit(
+            "choose only one of --download-attachments, "
+            "--download-relevant-attachments, or --attachment-index"
+        )
+    if args.download_relevant_attachments and not args.watch_request:
+        raise SystemExit("--download-relevant-attachments requires --watch-request")
+    attachment_policy = (
+        "all"
+        if args.download_attachments
+        else "relevant"
+        if args.download_relevant_attachments
+        else "selected"
+        if selected_indices
+        else "none"
+    )
     payload = resolve_notice_materials(
         notice,
         override_url=args.url,
@@ -666,6 +925,9 @@ def _resolve(args: argparse.Namespace) -> int:
         max_text_chars=args.max_text_chars,
         max_file_bytes=args.max_file_bytes,
         max_total_bytes=args.max_total_bytes,
+        attachment_policy=attachment_policy,
+        watch_request=args.watch_request,
+        selected_attachment_indices=selected_indices,
     )
     if store is not None and candidate is not None:
         store.update_candidate(
@@ -676,6 +938,108 @@ def _resolve(args: argparse.Namespace) -> int:
         )
         store.commit()
         store.close()
+    _print_json(payload, pretty=args.pretty)
+    return 0
+
+
+def _analyze(args: argparse.Namespace) -> int:
+    if args.top_k <= 0:
+        raise SystemExit("--top-k must be greater than zero")
+    if args.lexical_pool_size < args.top_k:
+        raise SystemExit("--lexical-pool-size must be at least --top-k")
+    if args.max_visual_pages < 0:
+        raise SystemExit("--max-visual-pages must not be negative")
+
+    compiled_intent = None
+    if args.watch_id:
+        try:
+            with NoticeStore(args.db) as store:
+                stored_profile = store.get_profile(args.watch_id, args.revision)
+        except KeyError as error:
+            raise SystemExit(str(error)) from error
+        profile = stored_profile.get("profile") or {}
+        request = str(profile.get("request") or "").strip()
+        raw_intent = profile.get("compiled_intent")
+        if not isinstance(raw_intent, dict):
+            raise SystemExit("stored watch profile requires compiled_intent")
+        compiled_intent = raw_intent
+    elif args.watch_profile_json:
+        profile = _load_json(args.watch_profile_json)
+        if not isinstance(profile, dict):
+            raise SystemExit("--watch-profile-json must contain one JSON object")
+        request = str(profile.get("request") or "").strip()
+        raw_intent = profile.get("compiled_intent")
+        if not isinstance(raw_intent, dict):
+            raise SystemExit("watch profile requires compiled_intent")
+        compiled_intent = raw_intent
+    else:
+        request = (
+            args.request.strip()
+            if args.request is not None
+            else Path(args.request_file).read_text(encoding="utf-8").strip()
+        )
+    if not request:
+        raise SystemExit("watch request must not be empty")
+
+    manifest: dict[str, Any] | None = None
+    if args.materials_json:
+        loaded = _load_json(args.materials_json)
+        if not isinstance(loaded, dict):
+            raise SystemExit("--materials-json must contain one JSON object")
+        manifest = loaded
+        evidence = evidence_from_materials(manifest)
+    else:
+        evidence = load_evidence_json(args.evidence_json)
+
+    if args.notice_json:
+        notice = _load_json(args.notice_json)
+        if not isinstance(notice, dict):
+            raise SystemExit("--notice-json must contain one JSON object")
+    else:
+        notice = manifest.get("notice", {}) if manifest else {}
+
+    if args.dry_run:
+        _print_json(
+            {
+                "type": "pnu_notice_ai_evidence",
+                "request": request,
+                "notice": notice,
+                "evidence": evidence.to_json(),
+            },
+            pretty=args.pretty,
+        )
+        return 0
+
+    client = NvidiaClient.from_env(args.api_key_env)
+    payload = run_ai_analysis(
+        client=client,
+        request=request,
+        evidence=evidence,
+        notice=notice,
+        chat_model=args.chat_model,
+        embedding_model=args.embedding_model,
+        use_embeddings=not args.no_embeddings,
+        lexical_pool_size=args.lexical_pool_size,
+        top_k=args.top_k,
+        max_visual_pages=args.max_visual_pages,
+        compiled_intent=compiled_intent,
+    )
+    if args.email_to:
+        classification = payload["decision"]["classification"]
+        deliver = classification == "matched" or (
+            classification == "uncertain" and args.email_uncertain
+        )
+        if deliver:
+            payload["delivery"] = send_email(
+                config=SMTPConfig.from_env(args.smtp_env_prefix),
+                recipient=args.email_to,
+                content=payload["email"],
+            )
+        else:
+            payload["delivery"] = {
+                "status": "skipped",
+                "reason": f"classification={classification}",
+            }
     _print_json(payload, pretty=args.pretty)
     return 0
 

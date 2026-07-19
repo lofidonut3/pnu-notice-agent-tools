@@ -19,7 +19,20 @@ pnu-notice = "pnu_event_gate.cli:main"
 pnu-event-gate = "pnu_event_gate.cli:main"
 
 [project.optional-dependencies]
+analysis = [
+  "openpyxl>=3.1",
+  "pillow>=10",
+  "pymupdf>=1.24",
+  "pypdf>=5"
+]
+worker = [
+  "psycopg[binary]>=3.2"
+]
 dev = [
+  "openpyxl>=3.1",
+  "pillow>=10",
+  "pymupdf>=1.24",
+  "pypdf>=5",
   "pytest>=8"
 ]
 

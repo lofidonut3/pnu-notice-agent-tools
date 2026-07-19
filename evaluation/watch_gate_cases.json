@@ -1,0 +1,138 @@
+[
+  {
+    "id": "tuition_scholarship",
+    "request": "2026학년도 2학기 등록금재원 우선선발장학금 신청 공지가 올라오면 알려줘",
+    "phrases": ["우선선발장학금"],
+    "positive_terms": ["2026학년도", "2학기"],
+    "title": "[장학] 2026학년도 2학기 학부 등록금재원 우선선발장학금 신청 안내 새글",
+    "source_id": "pnu-academic-ee-general-5204",
+    "expected_match": true
+  },
+  {
+    "id": "dorm_nonresident_recruitment",
+    "request": "2026학년도 2학기 부산캠퍼스 생활원 비원생 모집이 열리면 알려줘",
+    "phrases": ["비원생 모집"],
+    "positive_terms": ["대학생활원", "2학기"],
+    "title": "[대학생활원] 2026학년도 2학기 대학생활원(부산) 비원생 모집요강 공고 새글",
+    "source_id": "pnu-academic-ee-general-5204",
+    "expected_match": true
+  },
+  {
+    "id": "exchange_chonnam",
+    "request": "2026학년도 2학기 전남대 교류 수학 공지가 나오면 알려줘",
+    "phrases": ["교류 수학"],
+    "positive_terms": ["전남대", "2학기"],
+    "title": "[교류/교환/파견/어학연수] 2026학년도 2학기 교류 수학 안내 [전남대, 충남대, 울산과학기술원, 서울여대] 새글",
+    "source_id": "pnu-academic-history-general-6500",
+    "expected_match": true
+  },
+  {
+    "id": "wivis_recommendation",
+    "request": "위비스 추천채용 공지가 올라오면 알려줘",
+    "phrases": ["위비스"],
+    "positive_terms": ["추천채용"],
+    "title": "(주)위비스 추천채용 안내 새글",
+    "source_id": "pnu-academic-humanities-career-11354",
+    "expected_match": true
+  },
+  {
+    "id": "hd_hyundai_internship",
+    "request": "HD현대 채용연계형 현장실습 공지가 올라오면 알려줘",
+    "phrases": ["HD현대"],
+    "positive_terms": ["채용연계형", "현장실습"],
+    "title": "2026학년도 2학기 HD현대 채용연계형 현장실습학기제 안내(~7.15.(수)23:59) 새글",
+    "source_id": "pnu-academic-philosophy-undergrad-11291",
+    "expected_match": true
+  },
+  {
+    "id": "research_assistant",
+    "request": "2026년 2학기 연구조교 모집이 나오면 알려줘",
+    "phrases": ["연구) 조교 모집"],
+    "positive_terms": ["2026년", "2학기"],
+    "title": "2026년 2학기 장학(연구) 조교 모집 새글",
+    "source_id": "pnu-academic-phys-grad-12921",
+    "expected_match": true
+  },
+  {
+    "id": "english_diagnostic",
+    "request": "2학기 수강신청 전 영어 기초학력 진단평가 공지를 알려줘",
+    "phrases": ["영어 기초학력 진단평가"],
+    "positive_terms": ["수강신청", "2학기"],
+    "title": "2026학년도 2학기 수강신청 대비 영어 기초학력 진단평가 실시 안내 새글",
+    "source_id": "pnu-academic-pnutrade-undergrad-2560",
+    "expected_match": true
+  },
+  {
+    "id": "information_outage",
+    "request": "PNU-IDC 작업으로 정보서비스가 중단되면 알려줘",
+    "phrases": ["정보서비스 중단"],
+    "positive_terms": ["PNU-IDC"],
+    "title": "[알림] 대학통합전산센터(PNU-IDC) 고도화 작업에 따른 정보서비스 중단 안내 새글",
+    "source_id": "pnu-academic-semi-general-2869",
+    "expected_match": true
+  },
+  {
+    "id": "graduation_deferral",
+    "request": "2026년 8월 졸업유예 공지가 올라오면 알려줘",
+    "phrases": ["졸업유예"],
+    "positive_terms": ["2026년", "8월"],
+    "title": "[학부] 2025학년도 후기(2026년 8월 졸업) 졸업사정, 졸업유예 공지(+졸업예정자 계절수업 새글",
+    "source_id": "pnu-academic-soc-general-9355",
+    "expected_match": true
+  },
+  {
+    "id": "google_ai_webmail",
+    "request": "부산대 Google AI 도구 웹메일 신청 안내가 나오면 알려줘",
+    "phrases": ["Google AI"],
+    "positive_terms": ["웹메일", "신청"],
+    "title": "[기타] [글로컬] Google AI 도구 제공을 위한 부산대 웹메일 계정 신청.사용 안내 새글",
+    "source_id": "pnu-academic-socio-general-7572",
+    "expected_match": true
+  },
+  {
+    "id": "student_loan_interest",
+    "request": "2026 부산시 학자금대출 이자지원 공지가 나오면 알려줘",
+    "phrases": ["학자금대출 이자지원"],
+    "positive_terms": ["부산시", "2026"],
+    "title": "[부산시] 2026 학자금대출 이자지원사업 (~8/28(금) 18시) 새글",
+    "source_id": "pnu-academic-stat-general-4227",
+    "expected_match": true
+  },
+  {
+    "id": "yangsan_room_cleaning",
+    "request": "지행관 원생실 청소 공지가 나오면 알려줘",
+    "phrases": ["원생실 청소"],
+    "positive_terms": ["지행관"],
+    "title": "[지행관] 원생실 청소 안내",
+    "source_id": "pnu-dorm-yangsan-notices",
+    "expected_match": true
+  },
+  {
+    "id": "transfer_plan_update",
+    "request": "2026학년도 2학기 학부 전과 시행 계획이 수정되면 알려줘",
+    "phrases": ["전과 시행 계획"],
+    "positive_terms": ["2026학년도", "2학기"],
+    "title": "[학적] 2026학년도 2학기 전과 시행 계획 안내",
+    "source_id": "pnu-academic-biology-undergrad-5536",
+    "event_type": "updated",
+    "expected_match": true
+  },
+  {
+    "id": "negative_dorm_vs_scholarship",
+    "request": "웅비관 추가모집이 열리면 알려줘",
+    "phrases": ["웅비관 추가모집"],
+    "positive_terms": ["생활원"],
+    "title": "[장학] 2026학년도 2학기 학부 등록금재원 우선선발장학금 신청 안내 새글",
+    "source_id": "pnu-academic-ee-general-5204",
+    "expected_match": false
+  },
+  {
+    "id": "negative_cancellation_vs_exchange",
+    "request": "여름계절수업 데이터베이스 001분반이 폐강되면 알려줘",
+    "phrases": ["데이터베이스 001분반"],
+    "positive_terms": ["폐강", "여름계절수업"],
+    "title": "[학사과] 2026학년도 2학기 교류 수학 안내(동아대학교 대학원)",
+    "source_id": "pnu-main-notice",
+    "expected_match": false
+  }
+]

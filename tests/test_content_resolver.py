@@ -181,6 +181,44 @@ def test_resolve_downloads_binary_attachment_without_parsing(
     assert "extraction_status" not in attachment
 
 
+def test_resolve_selects_relevant_attachment_before_download(tmp_path: Path, capsys) -> None:
+    detail_path = tmp_path / "notice.html"
+    detail_path.write_text("<html><body>Course notice</body></html>", encoding="utf-8")
+    attachments = []
+    for name in [
+        "application-form.txt",
+        "cancelled-database-001.txt",
+        "general-schedule.txt",
+        "campus-map.txt",
+    ]:
+        path = tmp_path / name
+        path.write_text(name, encoding="utf-8")
+        attachments.append({"name": name, "url": path.as_uri(), "file_extension": "txt"})
+    event_path = _write_event(
+        tmp_path,
+        detail_url=detail_path.as_uri(),
+        attachments=attachments,
+    )
+
+    assert main([
+        "resolve",
+        "--event-json",
+        str(event_path),
+        "--download-relevant-attachments",
+        "--watch-request",
+        "notify me when database 001 is cancelled",
+        "--cache-dir",
+        str(tmp_path / "cache"),
+    ]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["attachment_plan"]["policy"] == "relevant"
+    assert payload["attachment_plan"]["selected_indices"] == [1]
+    assert payload["attachments"][1]["fetch_status"] == "ok"
+    assert payload["attachments"][0]["fetch_status"] == "not_selected"
+    assert payload["attachments"][2]["fetch_status"] == "not_selected"
+
+
 def test_resolve_direct_url_derives_attachment_links_from_detail_page(
     tmp_path: Path,
     capsys,

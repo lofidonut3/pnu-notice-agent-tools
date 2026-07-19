@@ -14,6 +14,11 @@ fetch the official detail page and requested attachments into a local cache.
 The `scan` command compares checked events with precompiled watch profiles
 before an agent is invoked.
 
+`run-watch-cycle` is the hosted-worker entry point. It scans the durable feed
+cursor, processes queued candidates, resolves relevant official materials,
+reuses each stored compiled intent, queues matched email in a durable outbox,
+and retries due outbox deliveries.
+
 This project and `pnu-public-notice-feed` are unofficial projects. They are not
 operated by Pusan National University.
 
@@ -30,10 +35,11 @@ pnu-notice-agent-tools
   -> check collapses same-notice duplicate groups
   -> queues matched candidates durably in local SQLite state
   -> resolve can materialize one selected notice's official page and attachments locally
-  -> does not call an LLM
-  -> does not perform final semantic relevance judgment
+  -> optionally compiles watch requests and performs grounded final analysis with NVIDIA endpoints
+  -> parses text, PDF, XLSX, CSV, ZIP, and HWP when the optional readers are available
+  -> transcribes image-only pages with the configured multimodal endpoint
   -> does not persist or mirror full notice bodies or attachment contents
-  -> does not provide push delivery
+  -> can optionally send matched plain-text results through operator-provided SMTP
 
 AI agent / automation
   -> compiles natural-language watch requests into watch profiles
@@ -57,11 +63,10 @@ before an agent or automation step handles it.
 7. After successful handling, the agent runs `pnu-notice candidate complete`.
 ```
 
-This package covers the deterministic local tool layer: cursoring, event
-selection, candidate matching, official material fetching, cache metadata, and
-acking. It does not compile natural-language watch requests, run the LLM final
-relevance judgment, parse HWP/PDF/XLSX attachment contents, or send
-notifications.
+The deterministic scan and candidate gate remain LLM-free. Optional commands
+can compile a natural-language request once, extract selected candidate
+materials, call NVIDIA's hosted chat/embedding endpoints for grounded final
+judgment, and send matched results through SMTP.
 
 `events.json` events are compact routing records. By default, this helper follows
 each event's `archive_file` and `archive_item_id` fields to enrich the output
@@ -87,6 +92,26 @@ The local state direction is documented in
 In short: `scan` keeps a scan cursor and durable candidate queue in local
 SQLite state, so unrelated notices stay quiet while matched candidates survive
 until resolve, reading, and notification handling completes.
+
+The optional cloud analysis direction is documented in
+[docs/jules-cloud-analysis-decision.md](docs/jules-cloud-analysis-decision.md).
+In short: a hosted watch gate may call Jules as an optional cloud worker for
+selected candidate notices, but Jules should not own scheduling, state, feed
+matching, or email delivery.
+
+The Gemini subscription-based cloud-agent direction is documented in
+[docs/gemini-scheduled-action-queue-decision.md](docs/gemini-scheduled-action-queue-decision.md).
+In short: a user may create one Gemini Scheduled Action that reads hidden Gmail
+queue emails from the hosted watch gate, uses the user's Gemini subscription for
+final relevance analysis, and reports only truly relevant notices through
+Gemini.
+
+The lower-friction Gemini public-feed direction is documented in
+[docs/gemini-public-feed-decision.md](docs/gemini-public-feed-decision.md).
+In short: a shared setup Gem can collect the user's watch request and create one
+Gemini Scheduled Action, while the public feed exposes Gemini-friendly latest
+and evidence pages that Gemini can read without Antigravity, API keys, or
+hosted per-user watch state.
 
 The lower-level `check` and `match` commands remain useful for debugging and
 composition.
@@ -128,6 +153,55 @@ python3 run.py candidate complete --candidate-id cand_... --result-json result.j
 ```bash
 python3 run.py
 ```
+
+Run one complete watch cycle with local SQLite state:
+
+```bash
+python3 run.py run-watch-cycle \
+  --db .pnu-notice-state.sqlite3 \
+  --email-to student@example.com \
+  --no-send --pretty
+```
+
+`--no-send` leaves matched notifications in the outbox. Remove it after the
+`PNU_SMTP_*` variables are configured.
+
+## Hosted Watch Runtime
+
+The workflow at `.github/workflows/process-feed-events.yml` runs on:
+
+- `repository_dispatch` type `pnu-feed-updated` after a successful feed deploy;
+- an hourly fallback schedule at minute 17;
+- manual `workflow_dispatch` for bootstrap and diagnostics.
+
+GitHub-hosted runners are ephemeral, so hosted execution must use Postgres rather
+than the default local SQLite file. Create a Supabase project, copy its Postgres
+connection URI with TLS enabled, and configure these repository secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `PNU_DATABASE_URL` | Supabase Postgres connection URI |
+| `NVIDIA_API_KEY` | Watch compilation and final analysis |
+| `PNU_EMAIL_TO` | Default recipient when a profile has no `delivery.email_to` |
+| `PNU_SMTP_HOST` | SMTP server |
+| `PNU_SMTP_FROM` | Sender address |
+| `PNU_SMTP_USERNAME` | Optional SMTP username |
+| `PNU_SMTP_PASSWORD` | Optional SMTP password |
+
+Optional repository variables are `PNU_SMTP_PORT` (default `587`) and
+`PNU_SMTP_STARTTLS` (default `true`). The worker creates and migrates its tables
+on connection. The database role therefore needs schema/table creation and normal
+read/write privileges.
+
+The first scheduled or dispatched run establishes a baseline cursor and does not
+analyze historical events. Use manual `workflow_dispatch` with
+`include_baseline=true` only when intentionally backfilling the current event
+window.
+
+In the feed repository, set `WATCH_DISPATCH_REPOSITORY` to
+`lofidonut3/pnu-notice-agent-tools` and `WATCH_DISPATCH_TOKEN` to a token that can
+create repository dispatches in this repository. A dispatch is only a wake hint;
+the hourly scan and persisted Postgres cursor recover missed or duplicate hints.
 
 On the first run, the helper stores the current latest event as a baseline and
 does not print old events. Later runs print JSON only when new events are
@@ -266,6 +340,23 @@ Download original attachments as local materials when needed:
 python3 run.py resolve --event-json selected-event.json --download-attachments --pretty
 ```
 
+For notices with many attachments, resolve the detail page and manifest first,
+then conservatively select files from the original watch request and attachment
+names:
+
+```bash
+python3 run.py resolve \
+  --event-json selected-event.json \
+  --download-relevant-attachments \
+  --watch-request "2026 여름계절수업에서 데이터베이스 001분반 폐강되면 알려줘" \
+  --pretty
+```
+
+Use repeated `--attachment-index` flags when a caller or planner has already
+selected exact manifest entries. Sets of three or fewer attachments are fetched
+together; when filename evidence is inconclusive, relevant mode also falls back
+to all attachments to avoid a silent false negative.
+
 The target output is a JSON materials manifest:
 
 ```json
@@ -309,13 +400,77 @@ The target output is a JSON materials manifest:
 }
 ```
 
-`resolve` fetches and records official local materials; it does not parse HWP,
-PDF, XLSX, or HWPX attachments and it does not decide whether the notice matches
-a user request. Attachment reading belongs in a separate reader skill or agent
-workflow that consumes the manifest. When given an event payload, it should use
-the payload's attachment metadata. When given only `--url`, it should fetch the
-official detail page and derive candidate attachment links from that page when
-possible.
+`resolve` only fetches and records official local materials. The separate
+`analyze` command consumes that manifest, extracts supported files, retrieves a
+small evidence set, and asks the configured model for a citation-constrained
+decision. When given only `--url`, `resolve` derives candidate attachment links
+from the official detail page when possible.
+
+## Optional NVIDIA Analysis
+
+Install attachment readers and set an NVIDIA trial API key in the environment:
+
+```bash
+python3 -m pip install -e ".[analysis]"
+export NVIDIA_API_KEY="..."
+```
+
+Compile and store a broad deterministic candidate profile:
+
+```bash
+python3 run.py profile compile \
+  --watch-id summer-db-001 \
+  --request "2026 여름계절수업에서 데이터베이스 001분반 폐강되면 알려줘" \
+  --store --pretty
+```
+
+After `resolve --download-attachments`, analyze its manifest:
+
+```bash
+python3 run.py analyze \
+  --request "2026 여름계절수업에서 데이터베이스 001분반 폐강되면 알려줘" \
+  --materials-json materials.json --pretty
+```
+
+A compiled profile can be reused so the natural-language request is not compiled
+again for every notice. Load the active revision directly from the SQLite store:
+
+```bash
+python3 run.py analyze \
+  --watch-id summer-db-001 \
+  --db .pnu-notice-state.sqlite3 \
+  --materials-json materials.json --pretty
+```
+
+`--watch-profile-json watch-profile.json` remains available for file-based
+pipelines, and `--revision` can select a non-active stored revision explicitly.
+
+Extraction prefers native document text and tables, then local Tesseract OCR.
+Only unresolved visual evidence selected from the request, compiled intent, and
+available text is sent to the multimodal endpoint. The default visual limit is
+eight pages and can be changed with `--max-visual-pages`.
+
+Use `--dry-run` to inspect extracted evidence without an API call. Use
+`--email-to` only after configuring `PNU_SMTP_HOST`, `PNU_SMTP_FROM`, and the
+optional `PNU_SMTP_USERNAME`/`PNU_SMTP_PASSWORD` variables. The email contains
+plain-text facts and source citations, not original attachments.
+
+Run the six-case endpoint evaluation:
+
+```bash
+python3 scripts/evaluate_ai_flow.py --output evaluation/latest-report.json
+```
+
+Run the deterministic gate evaluation captured from the public feed on
+2026-07-19:
+
+```bash
+python3 scripts/evaluate_watch_gate.py \
+  --output evaluation/watch_gate_report.json
+```
+
+It contains 15 scholarship, dormitory, exchange, recruitment, internship,
+outage, graduation, loan, and negative-control watch cases.
 
 ## Cursor Policy
 

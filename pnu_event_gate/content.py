@@ -19,6 +19,23 @@ DEFAULT_MAX_TEXT_CHARS = 12000
 DEFAULT_MAX_FILE_BYTES = 10_000_000
 DEFAULT_MAX_TOTAL_BYTES = 30_000_000
 DEFAULT_MAX_ATTACHMENT_BYTES = DEFAULT_MAX_FILE_BYTES
+DEFAULT_SMALL_ATTACHMENT_COUNT = 3
+
+ATTACHMENT_PLAN_STOP_TERMS = {
+    "공지",
+    "관련",
+    "첨부",
+    "첨부파일",
+    "파일",
+    "알려줘",
+    "알려주세요",
+    "되면",
+    "대한",
+    "해당",
+    "notice",
+    "attachment",
+    "file",
+}
 
 ATTACHMENT_EXTENSIONS = {
     "csv",
@@ -106,6 +123,9 @@ def resolve_notice_materials(
     max_text_chars: int,
     max_file_bytes: int,
     max_total_bytes: int,
+    attachment_policy: str | None = None,
+    watch_request: str | None = None,
+    selected_attachment_indices: set[int] | None = None,
 ) -> dict[str, Any]:
     detail_url = notice_detail_url(notice, override_url)
     if not detail_url:
@@ -124,16 +144,28 @@ def resolve_notice_materials(
     attachments = raw_attachments or (
         extract_attachment_links(detail_html, detail_url) if detail_html else []
     )
+    policy = attachment_policy or ("all" if download_attachments else "none")
+    attachment_plan = plan_attachment_downloads(
+        attachments,
+        policy=policy,
+        watch_request=watch_request,
+        selected_indices=selected_attachment_indices,
+    )
+    selected_indices = set(attachment_plan["selected_indices"])
     attachment_payloads: list[dict[str, Any]] = []
 
     for index, attachment in enumerate(attachments):
+        selected = index in selected_indices
         payload = materialize_attachment(
             index,
             attachment,
             material_dir=material_dir,
-            download=download_attachments,
+            download=selected,
             max_file_bytes=max_file_bytes,
             remaining_total_bytes=remaining_total_bytes,
+            skip_status=(
+                "not_requested" if policy == "none" else "not_selected"
+            ),
         )
         attachment_payloads = [*attachment_payloads, payload]
         payload_bytes = payload.get("bytes") if isinstance(payload.get("bytes"), int) else 0
@@ -145,6 +177,7 @@ def resolve_notice_materials(
         "notice": compact_notice(notice, detail_url),
         "detail": detail,
         "attachments": attachment_payloads,
+        "attachment_plan": attachment_plan,
         "limits": {
             "max_file_bytes": max_file_bytes,
             "max_total_bytes": max_total_bytes,
@@ -268,6 +301,7 @@ def materialize_attachment(
     download: bool,
     max_file_bytes: int,
     remaining_total_bytes: int,
+    skip_status: str = "not_requested",
 ) -> dict[str, Any]:
     base = attachment_base(index, attachment)
     if not download:
@@ -276,7 +310,7 @@ def materialize_attachment(
             "local_path": None,
             "bytes": None,
             "sha256": None,
-            "fetch_status": "not_requested",
+            "fetch_status": skip_status,
             "read_hints": read_hints(base.get("file_extension")),
         }
 
@@ -342,6 +376,77 @@ def materialize_attachment(
         "sha256": sha256_bytes(resource.body),
         "fetch_status": "ok",
         "read_hints": read_hints(extension),
+    }
+
+
+def plan_attachment_downloads(
+    attachments: list[dict[str, Any]],
+    *,
+    policy: str,
+    watch_request: str | None,
+    selected_indices: set[int] | None,
+    small_attachment_count: int = DEFAULT_SMALL_ATTACHMENT_COUNT,
+) -> dict[str, Any]:
+    if policy not in {"none", "all", "relevant", "selected"}:
+        raise ValueError(f"unsupported attachment policy: {policy}")
+    valid_indices = set(range(len(attachments)))
+    if policy == "none":
+        selected: set[int] = set()
+        reasons: dict[str, list[str]] = {}
+    elif policy == "all":
+        selected = valid_indices
+        reasons = {str(index): ["all policy"] for index in selected}
+    elif policy == "selected":
+        selected = set(selected_indices or set())
+        invalid = selected - valid_indices
+        if invalid:
+            raise ValueError(
+                "attachment index out of range: "
+                + ", ".join(str(index) for index in sorted(invalid))
+            )
+        reasons = {str(index): ["explicit index"] for index in selected}
+    else:
+        if not watch_request or not watch_request.strip():
+            raise ValueError("relevant attachment policy requires a watch request")
+        request_terms = attachment_match_terms(watch_request)
+        reasons = {}
+        selected = set()
+        if len(attachments) <= small_attachment_count:
+            selected = valid_indices
+            reasons = {
+                str(index): ["small attachment set"]
+                for index in selected
+            }
+        else:
+            for index, attachment in enumerate(attachments):
+                name = str(attachment.get("name") or "")
+                matched_terms = sorted(request_terms.intersection(attachment_match_terms(name)))
+                if matched_terms:
+                    selected.add(index)
+                    reasons[str(index)] = [
+                        "filename terms: " + ", ".join(matched_terms)
+                    ]
+            if not selected:
+                selected = valid_indices
+                reasons = {
+                    str(index): ["no reliable filename signal; conservative fallback"]
+                    for index in selected
+                }
+
+    return {
+        "policy": policy,
+        "attachment_count": len(attachments),
+        "selected_indices": sorted(selected),
+        "reasons": reasons,
+    }
+
+
+def attachment_match_terms(value: str) -> set[str]:
+    normalized = re.sub(r"[^0-9A-Za-z가-힣]+", " ", value.casefold())
+    return {
+        term
+        for term in normalized.split()
+        if len(term) >= 2 and term not in ATTACHMENT_PLAN_STOP_TERMS
     }
 
 

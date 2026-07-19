@@ -1,0 +1,175 @@
+[
+  {
+    "id": "scholarship_eligibility_and_support",
+    "request": "인문100년장학금 전공확립 I유형은 누가 신청할 수 있고 얼마를 지원받는지 알려줘. 첫 학기 이후 생활비 조건도 포함해줘.",
+    "notice": {
+      "title": "2026년 우수학생 국가장학사업 학생 사전 신청기간 안내",
+      "url": "https://onestop.pusan.ac.kr/page?menuCD=000000000000062&mode=DETAIL&seq=668"
+    },
+    "expected_classification": "matched",
+    "expected_intent_terms": ["인문100년", "전공확립", "I유형"],
+    "required_fact_groups": [
+      ["3학년", "3 학년"],
+      ["인문사회계열"],
+      ["등록금 전액", "등록금(전액)"],
+      ["250만 원", "250만원"],
+      ["92점", "92 점"]
+    ],
+    "expected_evidence_ids": ["E001", "E002"],
+    "chunks": [
+      {
+        "id": "E001",
+        "source_name": "2026년도 인문100년장학금 업무처리기준",
+        "kind": "pdf_page",
+        "page": 5,
+        "text": "학생 사전신청 대상은 대한민국 국적의 인문사회계열 학과(부)에 재학 중인 1학년 신입생(전공탐색유형) 또는 3학년(전공확립유형, 최대 2년 지원)이다."
+      },
+      {
+        "id": "E002",
+        "source_name": "2026년도 인문100년장학금 업무처리기준",
+        "kind": "pdf_page",
+        "page": 3,
+        "text": "I유형 공통 지원은 등록금 전액과 생활비 학기당 250만 원이다. 선발 후 최초 학기는 별도 기준 없이 생활비를 지원하고, 다음 학기부터 계속지원기준 충족자 중 직전학기 성적 백분위 92점 이상 취득 시 지원한다."
+      }
+    ]
+  },
+  {
+    "id": "national_scholarship_application",
+    "request": "2026년 2학기 국가장학금 1차 신청 기간, 대상, 신청 방법을 알려줘.",
+    "notice": {
+      "title": "2026년 2학기 국가장학금 1차 신청 기간 안내"
+    },
+    "expected_classification": "matched",
+    "expected_intent_terms": ["국가장학금", "2026", "1차"],
+    "required_fact_groups": [
+      ["5.22", "5월 22일"],
+      ["6.22", "6월 22일"],
+      ["재학생"],
+      ["한국장학재단 홈페이지", "홈페이지"],
+      ["모바일 앱", "모바일앱"]
+    ],
+    "expected_evidence_ids": ["E001"],
+    "chunks": [
+      {
+        "id": "E001",
+        "source_name": "2026년 2학기 국가장학금 1차 신청 포스터",
+        "kind": "ocr_page",
+        "page": 1,
+        "text": "신청기간: 2026. 5. 22.(금) 9시 ~ 6. 22.(월) 18시. 신청대상: 재학생, 신입생, 편입생, 재입학생, 복학생 등 모든 대학생. 신청방법: 한국장학재단 홈페이지 및 모바일 앱에서 학생 본인이 직접 신청."
+      }
+    ]
+  },
+  {
+    "id": "global_internship",
+    "request": "2026 부산 글로벌 인턴십 중국공상은행 부산지점 모집 인원, 근무기간, 접수마감과 주요 자격을 알려줘.",
+    "notice": {
+      "title": "2026년 부산 글로벌 인턴십 참여자 모집 안내"
+    },
+    "expected_classification": "matched",
+    "expected_intent_terms": ["글로벌 인턴십", "중국공상은행"],
+    "required_fact_groups": [
+      ["1명", "1 명"],
+      ["2026. 7. 1", "7월 1일"],
+      ["8. 31", "8월 31일"],
+      ["6. 15", "6월 15일"],
+      ["18시", "18:00"]
+    ],
+    "expected_evidence_ids": ["E001", "E002"],
+    "chunks": [
+      {
+        "id": "E001",
+        "source_name": "중국공상은행 부산지점 공고문",
+        "kind": "pdf_page",
+        "page": 1,
+        "text": "모집인원: 1명. 파견기간: 2개월(2026. 7. 1. - 8. 31.). 접수기간: 2026. 6. 5. ~ 2026. 6. 15. 18시."
+      },
+      {
+        "id": "E002",
+        "source_name": "중국공상은행 부산지점 공고문",
+        "kind": "pdf_page",
+        "page": 2,
+        "text": "지원자격: 부산 소재 대학 재학생 또는 휴학생으로 영어 또는 중국어 업무 수행이 가능하고 인턴십 전 기간 참여 가능한 자."
+      }
+    ]
+  },
+  {
+    "id": "course_removed_between_snapshots",
+    "request": "2026 여름계절수업에서 경제학원론(II) 001분반이 폐강되면 알려줘.",
+    "notice": {
+      "title": "2026학년도 여름계절수업 2차 폐강강좌 안내"
+    },
+    "expected_classification": "matched",
+    "expected_intent_terms": ["경제학원론(II)", "001"],
+    "required_fact_groups": [
+      ["경제학원론(II)", "경제학원론(ii)"],
+      ["001"],
+      ["폐강", "제거"]
+    ],
+    "expected_evidence_ids": ["E001", "E002"],
+    "chunks": [
+      {
+        "id": "E001",
+        "source_name": "2026-04-30 개설강좌 목록",
+        "kind": "xlsx_row",
+        "row": 84,
+        "text": "snapshot=before | 교과목번호=EC1600174 | 교과목명=경제학원론(II) | 분반=001 | exact_match_count=1"
+      },
+      {
+        "id": "E002",
+        "source_name": "2026-06-01 2차 폐강 후 개설강좌 목록",
+        "kind": "xlsx_row",
+        "row": 1,
+        "text": "snapshot=after | query_key=EC1600174/001 | exact_match_count=0 | change=removed_after_second_cancellation"
+      }
+    ]
+  },
+  {
+    "id": "course_never_existed",
+    "request": "2026 여름계절수업에서 데이터베이스 001분반이 폐강되면 알려줘.",
+    "notice": {
+      "title": "2026학년도 여름계절수업 2차 폐강강좌 안내"
+    },
+    "expected_classification": "not_matched",
+    "expected_intent_terms": ["데이터베이스", "001"],
+    "required_fact_groups": [
+      ["이전", "before"],
+      ["0", "없"]
+    ],
+    "expected_evidence_ids": ["E001", "E002"],
+    "chunks": [
+      {
+        "id": "E001",
+        "source_name": "2026-04-30 개설강좌 목록 검색 결과",
+        "kind": "xlsx_row",
+        "row": 1,
+        "text": "snapshot=before | query=데이터베이스/001 | exact_match_count=0"
+      },
+      {
+        "id": "E002",
+        "source_name": "2026-06-01 2차 폐강 후 개설강좌 목록 검색 결과",
+        "kind": "xlsx_row",
+        "row": 1,
+        "text": "snapshot=after | query=데이터베이스/001 | exact_match_count=0 | prior_existence_not_established=true"
+      }
+    ]
+  },
+  {
+    "id": "unrelated_notice",
+    "request": "2026년 2학기 웅비관 기숙사 추가모집이 열리면 알려줘.",
+    "notice": {
+      "title": "2026년 2학기 국가장학금 1차 신청 기간 안내"
+    },
+    "expected_classification": "not_matched",
+    "expected_intent_terms": ["웅비관", "추가모집"],
+    "required_fact_groups": [],
+    "expected_evidence_ids": ["E001"],
+    "chunks": [
+      {
+        "id": "E001",
+        "source_name": "국가장학금 신청 안내",
+        "kind": "html",
+        "text": "2026년 2학기 국가장학금 1차 신청은 한국장학재단 홈페이지에서 진행한다."
+      }
+    ]
+  }
+]

@@ -1,0 +1,441 @@
+{
+  "type": "pnu_notice_watch_gate_quality_report",
+  "snapshot_date": "2026-07-19",
+  "case_count": 15,
+  "passed_count": 15,
+  "recall": 1.0,
+  "precision": 1.0,
+  "results": [
+    {
+      "id": "tuition_scholarship",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "우선선발장학금",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "2026학년도",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2학기",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "dorm_nonresident_recruitment",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "비원생 모집",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "대학생활원",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2학기",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "exchange_chonnam",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "교류 수학",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "전남대",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2학기",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "wivis_recommendation",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 9,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "위비스",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "추천채용",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "hd_hyundai_internship",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "HD현대",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "채용연계형",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "현장실습",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "research_assistant",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "연구) 조교 모집",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "2026년",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2학기",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "english_diagnostic",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "영어 기초학력 진단평가",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "수강신청",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2학기",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "information_outage",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 9,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "정보서비스 중단",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "PNU-IDC",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "graduation_deferral",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "졸업유예",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "2026년",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "8월",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "google_ai_webmail",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "Google AI",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "웹메일",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "신청",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "student_loan_interest",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "학자금대출 이자지원",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "부산시",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2026",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "yangsan_room_cleaning",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 9,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "원생실 청소",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "지행관",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "transfer_plan_update",
+      "expected_match": true,
+      "actual_match": true,
+      "passed": true,
+      "score": 12,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [
+          {
+            "term": "전과 시행 계획",
+            "field": "title",
+            "score": 6
+          }
+        ],
+        "positive_terms": [
+          {
+            "term": "2026학년도",
+            "field": "title",
+            "score": 3
+          },
+          {
+            "term": "2학기",
+            "field": "title",
+            "score": 3
+          }
+        ],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "negative_dorm_vs_scholarship",
+      "expected_match": false,
+      "actual_match": false,
+      "passed": true,
+      "score": 0,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [],
+        "positive_terms": [],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    },
+    {
+      "id": "negative_cancellation_vs_exchange",
+      "expected_match": false,
+      "actual_match": false,
+      "passed": true,
+      "score": 0,
+      "threshold": 2,
+      "reasons": {
+        "phrases": [],
+        "positive_terms": [],
+        "negative_terms": [],
+        "source_hints": [],
+        "attachment_hints": []
+      }
+    }
+  ]
+}

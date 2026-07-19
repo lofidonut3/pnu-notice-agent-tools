@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .state import Cursor
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def dumps_json(value: Any) -> str:
@@ -22,11 +23,28 @@ def loads_json(value: str | None, default: Any = None) -> Any:
 
 
 class NoticeStore:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(str(path))
-        self.connection.row_factory = sqlite3.Row
+    def __init__(self, target: Path | str) -> None:
+        self.target = str(target)
+        self.backend = (
+            "postgres"
+            if self.target.startswith(("postgres://", "postgresql://"))
+            else "sqlite"
+        )
+        if self.backend == "postgres":
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+            except ImportError as error:
+                raise RuntimeError(
+                    "Postgres state requires psycopg; install pnu-notice-agent-tools[worker]"
+                ) from error
+            self.path = None
+            self.connection = psycopg.connect(self.target, row_factory=dict_row)
+        else:
+            self.path = Path(self.target)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.connection = sqlite3.connect(str(self.path))
+            self.connection.row_factory = sqlite3.Row
         self._initialize()
 
     def close(self) -> None:
@@ -39,7 +57,7 @@ class NoticeStore:
         self.close()
 
     def _initialize(self) -> None:
-        self.connection.executescript(
+        self._executescript(
             """
             create table if not exists meta (
               key text primary key,
@@ -107,6 +125,25 @@ class NoticeStore:
               metadata_json text
             );
 
+            create table if not exists notification_outbox (
+              outbox_id text primary key,
+              candidate_id text not null,
+              watch_id text not null,
+              event_id text not null,
+              decision_hash text not null,
+              channel text not null,
+              recipient text not null,
+              payload_json text not null,
+              status text not null,
+              attempts integer not null default 0,
+              next_attempt_at text,
+              last_error text,
+              created_at text not null,
+              updated_at text not null,
+              sent_at text,
+              unique (watch_id, event_id, decision_hash, channel, recipient)
+            );
+
             create table if not exists runs (
               run_id text primary key,
               command text not null,
@@ -119,11 +156,27 @@ class NoticeStore:
             );
             """
         )
-        self.connection.execute(
-            "insert or replace into meta (key, value) values ('schema_version', ?)",
+        self._execute(
+            """
+            insert into meta (key, value) values ('schema_version', ?)
+            on conflict(key) do update set value = excluded.value
+            """,
             (str(SCHEMA_VERSION),),
         )
         self.connection.commit()
+
+    def _execute(self, query: str, parameters: tuple[Any, ...] = ()) -> Any:
+        if self.backend == "postgres":
+            query = query.replace("?", "%s")
+        return self.connection.execute(query, parameters)
+
+    def _executescript(self, script: str) -> None:
+        if self.backend == "sqlite":
+            self.connection.executescript(script)
+            return
+        for statement in script.split(";"):
+            if statement.strip():
+                self.connection.execute(statement)
 
     def http_headers(self) -> dict[str, str]:
         row = self._scan_state_row()
@@ -156,7 +209,7 @@ class NoticeStore:
         status: str,
         warnings: list[str],
     ) -> None:
-        self.connection.execute(
+        self._execute(
             """
             insert into scan_state (
               id, last_seen_event_id, last_seen_at, last_checked_at,
@@ -191,16 +244,16 @@ class NoticeStore:
         revision = str(profile.get("revision") or "1")
         enabled = 1 if profile.get("enabled", True) else 0
         if enabled:
-            self.connection.execute(
+            self._execute(
                 "update profiles set enabled = 0, updated_at = ? where watch_id = ? and revision != ?",
                 (now, watch_id, revision),
             )
-        existing = self.connection.execute(
+        existing = self._execute(
             "select created_at from profiles where watch_id = ? and revision = ?",
             (watch_id, revision),
         ).fetchone()
         created_at = existing["created_at"] if existing else now
-        self.connection.execute(
+        self._execute(
             """
             insert into profiles (
               watch_id, revision, enabled, type, request, profile_json,
@@ -238,14 +291,14 @@ class NoticeStore:
 
     def list_profiles(self, *, include_disabled: bool = False) -> list[dict[str, Any]]:
         where = "" if include_disabled else "where enabled = 1"
-        rows = self.connection.execute(
+        rows = self._execute(
             f"select * from profiles {where} order by watch_id, revision"
         ).fetchall()
         return [self._profile_from_row(row) for row in rows]
 
     def get_profile(self, watch_id: str, revision: str | None = None) -> dict[str, Any]:
         if revision is None:
-            row = self.connection.execute(
+            row = self._execute(
                 """
                 select * from profiles
                 where watch_id = ? and enabled = 1
@@ -255,7 +308,7 @@ class NoticeStore:
                 (watch_id,),
             ).fetchone()
         else:
-            row = self.connection.execute(
+            row = self._execute(
                 "select * from profiles where watch_id = ? and revision = ?",
                 (watch_id, revision),
             ).fetchone()
@@ -264,21 +317,22 @@ class NoticeStore:
         return self._profile_from_row(row)
 
     def disable_profile(self, watch_id: str, *, now: str) -> int:
-        cursor = self.connection.execute(
+        cursor = self._execute(
             "update profiles set enabled = 0, updated_at = ? where watch_id = ? and enabled = 1",
             (now, watch_id),
         )
         return int(cursor.rowcount or 0)
 
     def insert_candidate(self, candidate: dict[str, Any]) -> bool:
-        cursor = self.connection.execute(
+        cursor = self._execute(
             """
-            insert or ignore into candidates (
+            insert into candidates (
               candidate_id, watch_id, profile_revision, event_id, notice_id,
               seen_at, source_id, same_notice_group_id, status, score, action,
               match_json, event_json, created_at, updated_at
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(candidate_id) do nothing
             """,
             (
                 candidate["candidate_id"],
@@ -302,18 +356,18 @@ class NoticeStore:
 
     def list_candidates(self, *, status: str | None = None) -> list[dict[str, Any]]:
         if status:
-            rows = self.connection.execute(
+            rows = self._execute(
                 "select * from candidates where status = ? order by created_at, candidate_id",
                 (status,),
             ).fetchall()
         else:
-            rows = self.connection.execute(
+            rows = self._execute(
                 "select * from candidates order by created_at, candidate_id"
             ).fetchall()
         return [self._candidate_from_row(row) for row in rows]
 
     def get_candidate(self, candidate_id: str) -> dict[str, Any]:
-        row = self.connection.execute(
+        row = self._execute(
             "select * from candidates where candidate_id = ?",
             (candidate_id,),
         ).fetchone()
@@ -334,7 +388,7 @@ class NoticeStore:
     ) -> dict[str, Any]:
         current = self.get_candidate(candidate_id)
         attempts = int(current.get("attempts") or 0) + (1 if increment_attempts else 0)
-        self.connection.execute(
+        self._execute(
             """
             update candidates set
               status = ?,
@@ -358,13 +412,14 @@ class NoticeStore:
         return self.get_candidate(candidate_id)
 
     def record_receipt(self, receipt: dict[str, Any]) -> bool:
-        cursor = self.connection.execute(
+        cursor = self._execute(
             """
-            insert or ignore into notification_receipts (
+            insert into notification_receipts (
               receipt_id, candidate_id, watch_id, event_id, channel,
               payload_hash, status, created_at, sent_at, metadata_json
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(receipt_id) do nothing
             """,
             (
                 receipt["receipt_id"],
@@ -381,13 +436,109 @@ class NoticeStore:
         )
         return int(cursor.rowcount or 0) > 0
 
+    def enqueue_notification(self, notification: dict[str, Any]) -> bool:
+        cursor = self._execute(
+            """
+            insert into notification_outbox (
+              outbox_id, candidate_id, watch_id, event_id, decision_hash,
+              channel, recipient, payload_json, status, attempts,
+              next_attempt_at, last_error, created_at, updated_at, sent_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(outbox_id) do nothing
+            """,
+            (
+                notification["outbox_id"],
+                notification["candidate_id"],
+                notification["watch_id"],
+                notification["event_id"],
+                notification["decision_hash"],
+                notification.get("channel") or "email",
+                notification["recipient"],
+                dumps_json(notification["payload"]),
+                notification.get("status") or "pending",
+                int(notification.get("attempts") or 0),
+                notification.get("next_attempt_at"),
+                notification.get("last_error"),
+                notification["created_at"],
+                notification["updated_at"],
+                notification.get("sent_at"),
+            ),
+        )
+        return int(cursor.rowcount or 0) > 0
+
+    def list_due_notifications(self, *, now: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            select * from notification_outbox
+            where status in ('pending', 'retry')
+              and (next_attempt_at is null or next_attempt_at <= ?)
+            order by created_at, outbox_id
+            limit ?
+            """,
+            (now, limit),
+        ).fetchall()
+        return [self._outbox_from_row(row) for row in rows]
+
+    def mark_notification_sent(self, outbox_id: str, *, now: str) -> dict[str, Any]:
+        self._execute(
+            """
+            update notification_outbox set
+              status = 'sent', attempts = attempts + 1, last_error = null,
+              next_attempt_at = null, updated_at = ?, sent_at = ?
+            where outbox_id = ?
+            """,
+            (now, now, outbox_id),
+        )
+        return self.get_notification(outbox_id)
+
+    def mark_notification_failed(
+        self,
+        outbox_id: str,
+        *,
+        now: str,
+        error: str,
+        max_attempts: int = 5,
+    ) -> dict[str, Any]:
+        current = self.get_notification(outbox_id)
+        attempts = int(current["attempts"]) + 1
+        status = "needs_attention" if attempts >= max_attempts else "retry"
+        next_attempt_at = None
+        if status == "retry":
+            delay_minutes = min(60, 2 ** max(0, attempts - 1))
+            next_attempt_at = (
+                datetime.fromisoformat(now) + timedelta(minutes=delay_minutes)
+            ).isoformat()
+        self._execute(
+            """
+            update notification_outbox set
+              status = ?, attempts = ?, next_attempt_at = ?, last_error = ?,
+              updated_at = ?
+            where outbox_id = ?
+            """,
+            (status, attempts, next_attempt_at, error, now, outbox_id),
+        )
+        return self.get_notification(outbox_id)
+
+    def get_notification(self, outbox_id: str) -> dict[str, Any]:
+        row = self._execute(
+            "select * from notification_outbox where outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"notification not found: {outbox_id}")
+        return self._outbox_from_row(row)
+
     def status_summary(self) -> dict[str, Any]:
         scan = self._scan_state_row()
-        profile_rows = self.connection.execute(
+        profile_rows = self._execute(
             "select enabled, count(*) as count from profiles group by enabled"
         ).fetchall()
-        candidate_rows = self.connection.execute(
+        candidate_rows = self._execute(
             "select status, count(*) as count from candidates group by status"
+        ).fetchall()
+        outbox_rows = self._execute(
+            "select status, count(*) as count from notification_outbox group by status"
         ).fetchall()
         return {
             "type": "pnu_notice_status",
@@ -400,6 +551,10 @@ class NoticeStore:
                 str(row["status"]): int(row["count"])
                 for row in candidate_rows
             },
+            "outbox": {
+                str(row["status"]): int(row["count"])
+                for row in outbox_rows
+            },
         }
 
     def commit(self) -> None:
@@ -409,7 +564,7 @@ class NoticeStore:
         self.connection.rollback()
 
     def _scan_state_row(self) -> sqlite3.Row | None:
-        return self.connection.execute(
+        return self._execute(
             "select * from scan_state where id = 'default'"
         ).fetchone()
 
@@ -447,6 +602,25 @@ class NoticeStore:
             "last_error": row["last_error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+        }
+
+    def _outbox_from_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "outbox_id": row["outbox_id"],
+            "candidate_id": row["candidate_id"],
+            "watch_id": row["watch_id"],
+            "event_id": row["event_id"],
+            "decision_hash": row["decision_hash"],
+            "channel": row["channel"],
+            "recipient": row["recipient"],
+            "payload": loads_json(row["payload_json"], {}),
+            "status": row["status"],
+            "attempts": row["attempts"],
+            "next_attempt_at": row["next_attempt_at"],
+            "last_error": row["last_error"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "sent_at": row["sent_at"],
         }
 
     def _scan_summary(self, row: sqlite3.Row | None) -> dict[str, Any]:
