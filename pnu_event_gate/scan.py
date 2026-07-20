@@ -32,111 +32,145 @@ def run_scan(
     limit: int | None = None,
 ) -> dict[str, Any] | None:
     scanned_at = now_iso()
-    result = fetch_events_feed(events_url, store.http_headers())
-    if result.status_code == 304:
-        store.update_scan_state(
-            cursor=store.scan_cursor(),
-            checked_at=scanned_at,
-            feed_generated_at=None,
-            etag=result.etag,
-            last_modified=result.last_modified,
-            status="not_modified",
-            warnings=[],
+    run_id = store.start_run(command="scan", started_at=scanned_at)
+    store.commit()
+
+    def finish_run(
+        *,
+        status: str,
+        input_event_count: int = 0,
+        candidate_count: int = 0,
+        warnings: list[str] | None = None,
+    ) -> None:
+        store.finish_run(
+            run_id,
+            finished_at=now_iso(),
+            status=status,
+            input_event_count=input_event_count,
+            candidate_count=candidate_count,
+            warnings=warnings,
         )
         store.commit()
-        return None
 
-    if result.feed is None:
-        return None
+    try:
+        result = fetch_events_feed(events_url, store.http_headers())
+        if result.status_code == 304:
+            store.update_scan_state(
+                cursor=store.scan_cursor(),
+                checked_at=scanned_at,
+                feed_generated_at=None,
+                etag=result.etag,
+                last_modified=result.last_modified,
+                status="not_modified",
+                warnings=[],
+            )
+            finish_run(status="ok")
+            return None
 
-    validate_feed(result.feed)
-    previous_cursor = store.scan_cursor()
-    if previous_cursor.is_empty() and not include_baseline:
-        latest = feed_latest_cursor(result.feed)
+        if result.feed is None:
+            finish_run(status="degraded", warnings=["feed response had no payload"])
+            return None
+
+        validate_feed(result.feed)
+        previous_cursor = store.scan_cursor()
+        if previous_cursor.is_empty() and not include_baseline:
+            latest = feed_latest_cursor(result.feed)
+            store.update_scan_state(
+                cursor=latest,
+                checked_at=scanned_at,
+                feed_generated_at=result.feed.get("generated_at"),
+                etag=result.etag,
+                last_modified=result.last_modified,
+                status="baseline",
+                warnings=[],
+            )
+            finish_run(status="ok")
+            return None
+
+        selection = select_new_events(result.feed, previous_cursor)
+        warnings = list(selection.warnings)
+        cursor_status = selection.status
+        if selection.status == "archive_required" and not no_archive_catchup:
+            try:
+                selection = select_archive_events(result.feed, events_url, previous_cursor)
+                warnings = list(selection.warnings)
+                cursor_status = selection.status
+            except Exception as error:  # noqa: BLE001 - scan should preserve feed progress info.
+                warnings = [*warnings, f"archive catch-up failed: {error}"]
+
+        filtered_events = apply_filters(
+            selection.events,
+            source_ids=None,
+            source_categories=None,
+            topics=None,
+            event_types=None,
+            limit=limit,
+        )
+        dedupe_selection = (
+            collapse_duplicate_events(filtered_events)
+            if not no_dedupe
+            else None
+        )
+        selected_events = dedupe_selection.events if dedupe_selection else filtered_events
+        if selected_events and not no_archive:
+            archive_enrichment = enrich_events_from_archives(selected_events, events_url)
+            selected_events = archive_enrichment.events
+            warnings = [*warnings, *archive_enrichment.warnings]
+
+        compact_events = [compact_event(event) for event in selected_events]
+        profiles = store.list_profiles()
+        candidates = enqueue_candidates(
+            store=store,
+            profiles=[profile["profile"] for profile in profiles],
+            events=compact_events,
+            now=scanned_at,
+        )
+
+        next_cursor = (
+            event_cursor(filtered_events[-1])
+            if filtered_events
+            else previous_cursor
+        )
         store.update_scan_state(
-            cursor=latest,
+            cursor=next_cursor,
             checked_at=scanned_at,
             feed_generated_at=result.feed.get("generated_at"),
             etag=result.etag,
             last_modified=result.last_modified,
-            status="baseline",
-            warnings=[],
+            status="ok",
+            warnings=warnings,
         )
-        store.commit()
-        return None
+        finish_run(
+            status="degraded" if warnings else "ok",
+            input_event_count=len(selection.events),
+            candidate_count=len(candidates),
+            warnings=warnings,
+        )
 
-    selection = select_new_events(result.feed, previous_cursor)
-    warnings = list(selection.warnings)
-    cursor_status = selection.status
-    if selection.status == "archive_required" and not no_archive_catchup:
-        try:
-            selection = select_archive_events(result.feed, events_url, previous_cursor)
-            warnings = list(selection.warnings)
-            cursor_status = selection.status
-        except Exception as error:  # noqa: BLE001 - scan should preserve feed progress info.
-            warnings = [*warnings, f"archive catch-up failed: {error}"]
+        if not candidates:
+            return None
 
-    filtered_events = apply_filters(
-        selection.events,
-        source_ids=None,
-        source_categories=None,
-        topics=None,
-        event_types=None,
-        limit=limit,
-    )
-    dedupe_selection = (
-        collapse_duplicate_events(filtered_events)
-        if not no_dedupe
-        else None
-    )
-    selected_events = dedupe_selection.events if dedupe_selection else filtered_events
-    if selected_events and not no_archive:
-        archive_enrichment = enrich_events_from_archives(selected_events, events_url)
-        selected_events = archive_enrichment.events
-        warnings = [*warnings, *archive_enrichment.warnings]
-
-    compact_events = [compact_event(event) for event in selected_events]
-    profiles = store.list_profiles()
-    candidates = enqueue_candidates(
-        store=store,
-        profiles=[profile["profile"] for profile in profiles],
-        events=compact_events,
-        now=scanned_at,
-    )
-
-    next_cursor = (
-        event_cursor(filtered_events[-1])
-        if filtered_events
-        else previous_cursor
-    )
-    store.update_scan_state(
-        cursor=next_cursor,
-        checked_at=scanned_at,
-        feed_generated_at=result.feed.get("generated_at"),
-        etag=result.etag,
-        last_modified=result.last_modified,
-        status="ok",
-        warnings=warnings,
-    )
-    store.commit()
-
-    if not candidates:
-        return None
-
-    return {
-        "type": "pnu_notice_candidates",
-        "events_url": events_url,
-        "scanned_at": scanned_at,
-        "feed_generated_at": result.feed.get("generated_at"),
-        "cursor_status": cursor_status,
-        "previous_cursor": previous_cursor.to_json(),
-        "next_cursor": next_cursor.to_json(),
-        "input_event_count": len(selection.events),
-        "selected_event_count": len(selected_events),
-        "candidate_count": len(candidates),
-        "warnings": warnings,
-        "candidates": candidates,
-    }
+        return {
+            "type": "pnu_notice_candidates",
+            "events_url": events_url,
+            "scanned_at": scanned_at,
+            "feed_generated_at": result.feed.get("generated_at"),
+            "cursor_status": cursor_status,
+            "previous_cursor": previous_cursor.to_json(),
+            "next_cursor": next_cursor.to_json(),
+            "input_event_count": len(selection.events),
+            "selected_event_count": len(selected_events),
+            "candidate_count": len(candidates),
+            "warnings": warnings,
+            "candidates": candidates,
+        }
+    except Exception as error:
+        store.rollback()
+        finish_run(
+            status="failed",
+            warnings=[f"{type(error).__name__}: {error}"],
+        )
+        raise
 
 
 def enqueue_candidates(

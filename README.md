@@ -203,6 +203,11 @@ The worker creates and migrates its tables
 on connection. The database role therefore needs schema/table creation and normal
 read/write privileges.
 
+Each `scan` and `run-watch-cycle` invocation writes a durable row to the `runs`
+table. `python3 run.py status --db "$PNU_DATABASE_URL" --pretty` reports run counts
+by outcome and the latest run, including warnings and event/candidate counts. This
+record remains available when a workflow exits with an uncaught error.
+
 The first scheduled or dispatched run establishes a baseline cursor and does not
 analyze historical events. Use manual `workflow_dispatch` with
 `include_baseline=true` only when intentionally backfilling the current event

@@ -44,47 +44,75 @@ def run_watch_cycle(
     if process_limit <= 0 or send_limit <= 0:
         raise ValueError("process and send limits must be greater than zero")
 
-    scan_payload = run_scan(
-        store=store,
-        events_url=events_url,
-        include_baseline=include_baseline,
-    )
-    candidates = _pending_candidates(store)[:process_limit]
-    client: AIClient | None = None
-    processed: list[dict[str, Any]] = []
-    for candidate in candidates:
-        if client is None:
-            client = client_factory()
-        processed.append(
-            process_candidate(
-                store=store,
-                candidate=candidate,
-                client=client,
-                cache_dir=cache_dir,
-                default_email_to=default_email_to,
-                max_attempts=max_attempts,
-                use_embeddings=use_embeddings,
-                max_visual_pages=max_visual_pages,
-                chat_model=chat_model,
-                embedding_model=embedding_model,
-            )
+    started_at = now_iso()
+    run_id = store.start_run(command="run-watch-cycle", started_at=started_at)
+    store.commit()
+    try:
+        scan_payload = run_scan(
+            store=store,
+            events_url=events_url,
+            include_baseline=include_baseline,
         )
+        candidates = _pending_candidates(store)[:process_limit]
+        client: AIClient | None = None
+        processed: list[dict[str, Any]] = []
+        for candidate in candidates:
+            if client is None:
+                client = client_factory()
+            processed.append(
+                process_candidate(
+                    store=store,
+                    candidate=candidate,
+                    client=client,
+                    cache_dir=cache_dir,
+                    default_email_to=default_email_to,
+                    max_attempts=max_attempts,
+                    use_embeddings=use_embeddings,
+                    max_visual_pages=max_visual_pages,
+                    chat_model=chat_model,
+                    embedding_model=embedding_model,
+                )
+            )
 
-    deliveries = deliver_due_notifications(
-        store=store,
-        sender=notification_sender,
-        limit=send_limit,
-        max_attempts=max_attempts,
-    )
-    return {
-        "type": "pnu_notice_watch_cycle",
-        "completed_at": now_iso(),
-        "scan": scan_payload,
-        "candidate_count": len(candidates),
-        "processed": processed,
-        "deliveries": deliveries,
-        "status": store.status_summary(),
-    }
+        deliveries = deliver_due_notifications(
+            store=store,
+            sender=notification_sender,
+            limit=send_limit,
+            max_attempts=max_attempts,
+        )
+        warnings = [
+            str(item["error"])
+            for item in [*processed, *deliveries]
+            if item.get("error")
+        ]
+        store.finish_run(
+            run_id,
+            finished_at=now_iso(),
+            status="degraded" if warnings else "ok",
+            input_event_count=int((scan_payload or {}).get("input_event_count") or 0),
+            candidate_count=len(candidates),
+            warnings=warnings,
+        )
+        store.commit()
+        return {
+            "type": "pnu_notice_watch_cycle",
+            "completed_at": now_iso(),
+            "scan": scan_payload,
+            "candidate_count": len(candidates),
+            "processed": processed,
+            "deliveries": deliveries,
+            "status": store.status_summary(),
+        }
+    except Exception as error:
+        store.rollback()
+        store.finish_run(
+            run_id,
+            finished_at=now_iso(),
+            status="failed",
+            warnings=[f"{type(error).__name__}: {error}"],
+        )
+        store.commit()
+        raise
 
 
 def process_candidate(

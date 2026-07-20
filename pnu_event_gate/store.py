@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .state import Cursor
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def dumps_json(value: Any) -> str:
@@ -154,6 +155,12 @@ class NoticeStore:
               candidate_count integer,
               warnings_json text
             );
+
+            create index if not exists runs_started_at_idx
+              on runs (started_at);
+
+            create index if not exists runs_status_idx
+              on runs (status);
             """
         )
         self._execute(
@@ -529,6 +536,74 @@ class NoticeStore:
             raise KeyError(f"notification not found: {outbox_id}")
         return self._outbox_from_row(row)
 
+    def start_run(
+        self,
+        *,
+        command: str,
+        started_at: str,
+        run_id: str | None = None,
+    ) -> str:
+        resolved_run_id = run_id or (
+            "run_"
+            + datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
+            + f"_{uuid4().hex[:12]}"
+        )
+        self._execute(
+            """
+            insert into runs (
+              run_id, command, started_at, status,
+              input_event_count, candidate_count, warnings_json
+            ) values (?, ?, ?, 'running', 0, 0, ?)
+            """,
+            (resolved_run_id, command, started_at, dumps_json([])),
+        )
+        return resolved_run_id
+
+    def finish_run(
+        self,
+        run_id: str,
+        *,
+        finished_at: str,
+        status: str,
+        input_event_count: int = 0,
+        candidate_count: int = 0,
+        warnings: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._execute(
+            """
+            update runs set
+              finished_at = ?, status = ?, input_event_count = ?,
+              candidate_count = ?, warnings_json = ?
+            where run_id = ?
+            """,
+            (
+                finished_at,
+                status,
+                input_event_count,
+                candidate_count,
+                dumps_json(warnings or []),
+                run_id,
+            ),
+        )
+        row = self._execute(
+            "select * from runs where run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"run not found: {run_id}")
+        return self._run_from_row(row)
+
+    def list_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            select * from runs
+            order by coalesce(finished_at, started_at) desc, run_id desc
+            limit ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._run_from_row(row) for row in rows]
+
     def status_summary(self) -> dict[str, Any]:
         scan = self._scan_state_row()
         profile_rows = self._execute(
@@ -540,6 +615,16 @@ class NoticeStore:
         outbox_rows = self._execute(
             "select status, count(*) as count from notification_outbox group by status"
         ).fetchall()
+        run_rows = self._execute(
+            "select status, count(*) as count from runs group by status"
+        ).fetchall()
+        latest_run = self._execute(
+            """
+            select * from runs
+            order by coalesce(finished_at, started_at) desc, run_id desc
+            limit 1
+            """
+        ).fetchone()
         return {
             "type": "pnu_notice_status",
             "scan": self._scan_summary(scan),
@@ -554,6 +639,13 @@ class NoticeStore:
             "outbox": {
                 str(row["status"]): int(row["count"])
                 for row in outbox_rows
+            },
+            "runs": {
+                "by_status": {
+                    str(row["status"]): int(row["count"])
+                    for row in run_rows
+                },
+                "latest": self._run_from_row(latest_run) if latest_run else None,
             },
         }
 
@@ -621,6 +713,18 @@ class NoticeStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "sent_at": row["sent_at"],
+        }
+
+    def _run_from_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "run_id": row["run_id"],
+            "command": row["command"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "status": row["status"],
+            "input_event_count": int(row["input_event_count"] or 0),
+            "candidate_count": int(row["candidate_count"] or 0),
+            "warnings": loads_json(row["warnings_json"], []),
         }
 
     def _scan_summary(self, row: sqlite3.Row | None) -> dict[str, Any]:

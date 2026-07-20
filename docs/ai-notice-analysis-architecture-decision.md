@@ -370,7 +370,7 @@ The current linear implementation remains useful for end-to-end quality validati
 but it is a transitional state. Migration will preserve existing feed and extraction
 behavior while changing ownership of cached artifacts and decisions.
 
-### Implemented in the 2026-07-19 iteration
+### Implemented through the 2026-07-20 iteration
 
 - The feed publishes valid healthy-source changes even when non-critical sources
   are temporarily degraded, while size and structural checks remain blocking.
@@ -392,17 +392,24 @@ behavior while changing ownership of cached artifacts and decisions.
   cursor-based fallback schedule with non-overlapping concurrency.
 - The durable email outbox uses watch, event, decision, channel, and recipient
   identity to suppress duplicate delivery and retain retry state.
+- The hosted runtime is provisioned with Supabase Postgres, Gemini as the default
+  analysis provider, NVIDIA as an optional fallback, Gmail SMTP delivery, and the
+  feed repository's dispatch credential. SMTP and repository-dispatch smoke tests
+  have both completed successfully.
+- Every scan and complete watch cycle persists a durable run record with command,
+  timestamps, outcome, event and candidate counts, and warnings. Uncaught failures
+  are recorded before the workflow exits, and `status` exposes aggregate and latest
+  run information.
 
 ### Still required for the target architecture
 
-- Configure Supabase, NVIDIA, SMTP, and dispatch credentials, then deploy the
-  implemented hosted receiver. These external resources are not provisioned by
-  repository code.
 - Share extracted notice artifacts and embeddings across all users by content hash,
   rather than only reusing downloaded files in a local materials directory.
 - Add complete predicate-specific evaluators and stronger fact-level citation
   validation, especially versioned course-list comparisons.
-- Add provider abstraction, quotas, production metrics, and operator alerts.
+- Add provider abstraction, quotas, detailed production metrics, and operator
+  alerts. Durable run audit now supplies the base data but does not yet notify an
+  operator or measure model cost, latency, and extraction quality.
 
 ### P0: Required before broader use
 

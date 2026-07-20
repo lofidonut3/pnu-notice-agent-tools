@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from pnu_event_gate.store import NoticeStore
 from pnu_event_gate.worker import _pending_candidates, deliver_due_notifications, run_watch_cycle
 
@@ -83,6 +85,30 @@ def test_watch_cycle_queues_before_sending_and_is_idempotent(
         assert second["deliveries"] == []
         assert sent == [("student@example.test", "Matched")]
         assert store.status_summary()["outbox"] == {"sent": 1}
+        assert store.status_summary()["runs"]["by_status"] == {"ok": 2}
+
+
+def test_watch_cycle_records_uncaught_failure(tmp_path: Path, monkeypatch) -> None:
+    with NoticeStore(tmp_path / "state.sqlite3") as store:
+        def fail_scan(**_kwargs) -> None:
+            raise RuntimeError("feed unavailable")
+
+        monkeypatch.setattr("pnu_event_gate.worker.run_scan", fail_scan)
+
+        with pytest.raises(RuntimeError, match="feed unavailable"):
+            run_watch_cycle(
+                store=store,
+                events_url="events.json",
+                cache_dir=tmp_path / "cache",
+                client_factory=lambda: UnusedClient(),
+                notification_sender=None,
+            )
+
+        runs = store.list_runs()
+        assert len(runs) == 1
+        assert runs[0]["command"] == "run-watch-cycle"
+        assert runs[0]["status"] == "failed"
+        assert runs[0]["warnings"] == ["RuntimeError: feed unavailable"]
 
 
 def test_outbox_failure_is_retried_then_needs_attention(tmp_path: Path) -> None:

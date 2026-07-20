@@ -44,7 +44,7 @@ class DedupeSelection:
 
 
 def now_iso() -> str:
-    return datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")
+    return datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="microseconds")
 
 
 def fetch_events_feed(events_url: str, headers: dict[str, str] | None = None) -> FetchResult:

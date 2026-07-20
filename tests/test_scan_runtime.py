@@ -55,6 +55,9 @@ def test_scan_enqueues_matching_candidate_and_advances_cursor(
     status = json.loads(capsys.readouterr().out)
     assert status["scan"]["last_seen_event_id"] == "event-academic"
     assert status["candidates"]["pending"] == 1
+    assert status["runs"]["by_status"] == {"ok": 2}
+    assert status["runs"]["latest"]["command"] == "scan"
+    assert status["runs"]["latest"]["candidate_count"] == 0
 
 
 def test_scan_with_no_candidates_is_quiet_but_records_status(
@@ -96,6 +99,7 @@ def test_scan_with_no_candidates_is_quiet_but_records_status(
     status = json.loads(capsys.readouterr().out)
     assert status["scan"]["last_seen_event_id"] == "event-academic"
     assert status["candidates"] == {}
+    assert status["runs"]["by_status"] == {"ok": 1}
 
 
 def test_resolve_candidate_and_complete_candidate(
