@@ -44,16 +44,9 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install local OCR
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor
-
-      - name: Install worker
-        run: python -m pip install -e ".[analysis,worker]"
-
       - name: Validate runtime configuration
         id: runtime
+        shell: bash
         run: |
           if [[ -z "$PNU_DATABASE_URL" ]]; then
             echo "::warning::PNU_DATABASE_URL is not configured; watch processing is skipped."
@@ -61,6 +54,16 @@ jobs:
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Install local OCR
+        if: steps.runtime.outputs.configured == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor
+
+      - name: Install worker
+        if: steps.runtime.outputs.configured == 'true'
+        run: python -m pip install -e ".[analysis,worker]"
 
       - name: Process feed cursor and outbox
         if: steps.runtime.outputs.configured == 'true'

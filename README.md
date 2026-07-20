@@ -124,6 +124,14 @@ Store a compiled watch profile:
 python3 run.py profile upsert --profile-json watch.json
 ```
 
+The course-cancellation example discussed during design is ready to register:
+
+```bash
+python3 run.py profile upsert \
+  --profile-json examples/watches/summer-2026-database-001-cancelled.json \
+  --db "$PNU_DATABASE_URL"
+```
+
 Run the quiet cron-facing scan:
 
 ```bash

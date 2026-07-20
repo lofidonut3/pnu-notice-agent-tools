@@ -1,0 +1,65 @@
+{
+  "schema_version": "watch_profile.v1",
+  "id": "summer-2026-database-001-cancelled",
+  "revision": "1",
+  "enabled": true,
+  "type": "recurring",
+  "request": "2026 여름계절수업에서 데이터베이스 001분반 폐강되면 알려줘",
+  "positive_terms": [
+    "여름계절수업",
+    "여름계절학기",
+    "폐강"
+  ],
+  "phrases": [],
+  "negative_terms": [],
+  "attachment_hints": [
+    "데이터베이스",
+    "001분반",
+    "폐강"
+  ],
+  "source_hints": {
+    "source_ids": [],
+    "source_categories": [],
+    "topics": [],
+    "tags": []
+  },
+  "thresholds": {
+    "candidate": 2,
+    "invoke_agent": 2
+  },
+  "compiled_intent": {
+    "schema_version": "watch_intent.v1",
+    "request": "2026 여름계절수업에서 데이터베이스 001분반 폐강되면 알려줘",
+    "event_type": "course_cancelled",
+    "entities": [
+      {
+        "type": "course",
+        "value": "데이터베이스",
+        "required": true
+      },
+      {
+        "type": "section",
+        "value": "001",
+        "required": true
+      },
+      {
+        "type": "academic_term",
+        "value": "2026 여름계절수업",
+        "required": true
+      }
+    ],
+    "exact_terms": [
+      "데이터베이스",
+      "001분반",
+      "폐강"
+    ],
+    "semantic_terms": [
+      "여름계절수업",
+      "여름계절학기",
+      "폐강강좌"
+    ],
+    "negative_terms": [],
+    "time_scope": "2026 여름계절수업",
+    "ambiguities": []
+  }
+}
