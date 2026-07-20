@@ -206,9 +206,10 @@ analyze historical events. Use manual `workflow_dispatch` with
 `include_baseline=true` only when intentionally backfilling the current event
 window.
 
-In the feed repository, set `WATCH_DISPATCH_REPOSITORY` to
-`lofidonut3/pnu-notice-agent-tools` and `WATCH_DISPATCH_TOKEN` to a token that can
-create repository dispatches in this repository. A dispatch is only a wake hint;
+In the feed repository, set `WATCH_DISPATCH_TOKEN` to a token that can create
+repository dispatches in this repository. The feed workflow already defaults
+`WATCH_DISPATCH_REPOSITORY` to `lofidonut3/pnu-notice-agent-tools`; use that
+optional variable only to override the target. A dispatch is only a wake hint;
 the hourly scan and persisted Postgres cursor recover missed or duplicate hints.
 
 On the first run, the helper stores the current latest event as a baseline and
