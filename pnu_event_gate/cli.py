@@ -51,6 +51,7 @@ from .scan import run_scan
 from .state import Cursor, EventGateState
 from .store import NoticeStore
 from .worker import run_watch_cycle
+from .watch_requests import process_watch_requests
 
 
 DEFAULT_STATE_PATH = Path(__file__).resolve().parents[1] / ".pnu-notice-state.json"
@@ -62,6 +63,7 @@ COMMANDS = {
     "analyze",
     "scan",
     "run-watch-cycle",
+    "process-watch-requests",
     "profile",
     "candidate",
     "status",
@@ -90,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         return _scan(args)
     if args.command == "run-watch-cycle":
         return _run_watch_cycle(args)
+    if args.command == "process-watch-requests":
+        return _process_watch_requests(args)
     if args.command == "profile":
         return _profile(args)
     if args.command == "candidate":
@@ -224,6 +228,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Keep due notifications queued without making SMTP calls.",
     )
     cycle.add_argument("--pretty", action="store_true")
+
+    request_worker = subparsers.add_parser(
+        "process-watch-requests",
+        help="Compile pending web watch requests and synchronize profile state.",
+    )
+    _add_db_arg(request_worker)
+    _add_ai_args(request_worker, include_embedding=False)
+    request_worker.add_argument("--limit", type=int, default=20)
+    request_worker.add_argument("--pretty", action="store_true")
 
     ack = subparsers.add_parser("ack", help="Advance cursor after downstream handling succeeds.")
     _add_common_args(ack)
@@ -708,6 +721,23 @@ def _run_watch_cycle(args: argparse.Namespace) -> int:
             max_visual_pages=args.max_visual_pages,
             chat_model=runtime.chat_model,
             embedding_model=runtime.embedding_model,
+        )
+    _print_json(payload, pretty=args.pretty)
+    return 0
+
+
+def _process_watch_requests(args: argparse.Namespace) -> int:
+    runtime = _ai_runtime_from_args(args)
+
+    def client_factory() -> AIClient:
+        return create_ai_client(runtime)
+
+    with NoticeStore(args.db) as store:
+        payload = process_watch_requests(
+            store=store,
+            client_factory=client_factory,
+            chat_model=runtime.chat_model,
+            limit=args.limit,
         )
     _print_json(payload, pretty=args.pretty)
     return 0

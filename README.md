@@ -220,6 +220,30 @@ repository dispatches in this repository. The feed workflow already defaults
 optional variable only to override the target. A dispatch is only a wake hint;
 the hourly scan and persisted Postgres cursor recover missed or duplicate hints.
 
+## Web App
+
+`web/` contains the PNU Watch React application. Users authenticate by email and
+manage only their own rows in Supabase `watch_requests`; row-level security and
+column grants prevent browser access to internal profiles, candidates, runtime
+state, and delivery records.
+
+The lightweight `Process web watch requests` workflow compiles pending requests
+into internal watch profiles and synchronizes pause/resume changes. It runs every
+ten minutes, on manual dispatch, and on the `pnu-watch-requested` repository
+dispatch event. The normal notice-processing workflow continues to own matching,
+analysis, and email delivery.
+
+Run the website locally:
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+The `Deploy PNU Watch web` workflow publishes the production build to GitHub
+Pages after changes under `web/` reach `main`.
+
 On the first run, the helper stores the current latest event as a baseline and
 does not print old events. Later runs print JSON only when new events are
 available.

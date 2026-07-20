@@ -90,6 +90,23 @@ class NoticeStore:
               primary key (watch_id, revision)
             );
 
+            create table if not exists watch_requests (
+              id text primary key,
+              user_id text not null,
+              request text not null,
+              delivery_email text not null,
+              enabled integer not null default 1,
+              status text not null default 'pending',
+              revision integer not null default 1,
+              watch_id text,
+              profile_revision text,
+              compiled_intent_json text,
+              last_error text,
+              created_at text not null,
+              updated_at text not null,
+              processed_at text
+            );
+
             create table if not exists candidates (
               candidate_id text primary key,
               watch_id text not null,
@@ -158,7 +175,7 @@ class NoticeStore:
 
             """
         )
-        self._execute(
+        cursor = self._execute(
             """
             insert into meta (key, value) values ('schema_version', ?)
             on conflict(key) do update set value = excluded.value
@@ -324,6 +341,95 @@ class NoticeStore:
             (now, watch_id),
         )
         return int(cursor.rowcount or 0)
+
+    def list_watch_requests(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        where = "where status = ?" if status else ""
+        parameters: tuple[Any, ...] = (status, limit) if status else (limit,)
+        rows = self._execute(
+            f"""
+            select * from watch_requests
+            {where}
+            order by created_at, id
+            limit ?
+            """,
+            parameters,
+        ).fetchall()
+        return [self._watch_request_from_row(row) for row in rows]
+
+    def claim_watch_request(self, request_id: str, *, now: str) -> bool:
+        cursor = self._execute(
+            """
+            update watch_requests
+            set status = 'processing', updated_at = ?, last_error = null
+            where id = ? and status = 'pending'
+            """,
+            (now, request_id),
+        )
+        return int(cursor.rowcount or 0) == 1
+
+    def complete_watch_request(
+        self,
+        request_id: str,
+        *,
+        expected_revision: int,
+        watch_id: str,
+        profile_revision: str,
+        compiled_intent: dict[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        cursor = self._execute(
+            """
+            update watch_requests set
+              status = 'active', watch_id = ?, profile_revision = ?,
+              compiled_intent_json = ?, last_error = null,
+              updated_at = ?, processed_at = ?
+            where id = ? and revision = ? and status = 'processing'
+            """,
+            (
+                watch_id,
+                profile_revision,
+                dumps_json(compiled_intent),
+                now,
+                now,
+                request_id,
+                expected_revision,
+            ),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            raise RuntimeError(f"watch request changed while processing: {request_id}")
+        return self.get_watch_request(request_id)
+
+    def fail_watch_request(
+        self,
+        request_id: str,
+        *,
+        expected_revision: int,
+        error: str,
+        now: str,
+    ) -> dict[str, Any]:
+        self._execute(
+            """
+            update watch_requests set
+              status = 'failed', last_error = ?, updated_at = ?
+            where id = ? and revision = ? and status = 'processing'
+            """,
+            (error, now, request_id, expected_revision),
+        )
+        return self.get_watch_request(request_id)
+
+    def get_watch_request(self, request_id: str) -> dict[str, Any]:
+        row = self._execute(
+            "select * from watch_requests where id = ?",
+            (request_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"watch request not found: {request_id}")
+        return self._watch_request_from_row(row)
 
     def insert_candidate(self, candidate: dict[str, Any]) -> bool:
         cursor = self._execute(
@@ -613,6 +719,9 @@ class NoticeStore:
         run_rows = self._execute(
             "select status, count(*) as count from runs group by status"
         ).fetchall()
+        watch_request_rows = self._execute(
+            "select status, count(*) as count from watch_requests group by status"
+        ).fetchall()
         latest_run = self._execute(
             """
             select * from runs
@@ -630,6 +739,10 @@ class NoticeStore:
             "candidates": {
                 str(row["status"]): int(row["count"])
                 for row in candidate_rows
+            },
+            "watch_requests": {
+                str(row["status"]): int(row["count"])
+                for row in watch_request_rows
             },
             "outbox": {
                 str(row["status"]): int(row["count"])
@@ -689,6 +802,24 @@ class NoticeStore:
             "last_error": row["last_error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+        }
+
+    def _watch_request_from_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": str(row["id"]),
+            "user_id": str(row["user_id"]),
+            "request": row["request"],
+            "delivery_email": row["delivery_email"],
+            "enabled": bool(row["enabled"]),
+            "status": row["status"],
+            "revision": int(row["revision"]),
+            "watch_id": row["watch_id"],
+            "profile_revision": row["profile_revision"],
+            "compiled_intent": loads_json(row["compiled_intent_json"], None),
+            "last_error": row["last_error"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "processed_at": row["processed_at"],
         }
 
     def _outbox_from_row(self, row: Any) -> dict[str, Any]:

@@ -400,6 +400,11 @@ behavior while changing ownership of cached artifacts and decisions.
   timestamps, outcome, event and candidate counts, and warnings. Uncaught failures
   after database initialization are recorded before the workflow exits, and
   `status` exposes aggregate and latest run information.
+- The PNU Watch web app uses Supabase email authentication and an RLS-protected
+  `watch_requests` queue. Browser clients can create, edit, pause, and resume only
+  their own requests; a separate lightweight worker compiles pending requests into
+  private versioned watch profiles without exposing runtime credentials or internal
+  state to the browser.
 
 ### Still required for the target architecture
 
