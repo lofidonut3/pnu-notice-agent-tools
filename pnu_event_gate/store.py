@@ -10,7 +10,7 @@ from uuid import uuid4
 from .state import Cursor
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 2
 
 
 def dumps_json(value: Any) -> str:
@@ -156,11 +156,6 @@ class NoticeStore:
               warnings_json text
             );
 
-            create index if not exists runs_started_at_idx
-              on runs (started_at);
-
-            create index if not exists runs_status_idx
-              on runs (status);
             """
         )
         self._execute(

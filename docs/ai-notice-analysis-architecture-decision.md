@@ -398,8 +398,8 @@ behavior while changing ownership of cached artifacts and decisions.
   have both completed successfully.
 - Every scan and complete watch cycle persists a durable run record with command,
   timestamps, outcome, event and candidate counts, and warnings. Uncaught failures
-  are recorded before the workflow exits, and `status` exposes aggregate and latest
-  run information.
+  after database initialization are recorded before the workflow exits, and
+  `status` exposes aggregate and latest run information.
 
 ### Still required for the target architecture
 
