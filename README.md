@@ -1,5 +1,11 @@
 # PNU Notice Agent Tools
 
+Live app: https://lofidonut3.github.io/pnu-notice-agent-tools/
+
+The web app lets each signed-in user create, edit, pause, and inspect natural-
+language PNU notice watches. New requests are compiled by the hosted worker and
+stored as versioned watch profiles for the existing feed pipeline.
+
 PNU Notice Agent Tools is a local CLI package for consuming
 [`pnu-public-notice-feed`](https://github.com/lofidonut3/pnu-public-notice-feed)
 `events.json`, scanning it against compiled watch profiles, queueing candidate
