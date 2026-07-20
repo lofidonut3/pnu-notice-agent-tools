@@ -1,0 +1,65 @@
+name: Test SMTP delivery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smtp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PNU_EMAIL_TO: ${{ secrets.PNU_EMAIL_TO }}
+      PNU_SMTP_HOST: ${{ secrets.PNU_SMTP_HOST }}
+      PNU_SMTP_PORT: ${{ vars.PNU_SMTP_PORT || '587' }}
+      PNU_SMTP_FROM: ${{ secrets.PNU_SMTP_FROM }}
+      PNU_SMTP_USERNAME: ${{ secrets.PNU_SMTP_USERNAME }}
+      PNU_SMTP_PASSWORD: ${{ secrets.PNU_SMTP_PASSWORD }}
+      PNU_SMTP_STARTTLS: ${{ vars.PNU_SMTP_STARTTLS || 'true' }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate SMTP configuration
+        shell: bash
+        run: |
+          required=(
+            PNU_EMAIL_TO
+            PNU_SMTP_HOST
+            PNU_SMTP_FROM
+            PNU_SMTP_USERNAME
+            PNU_SMTP_PASSWORD
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Send SMTP smoke-test email
+        run: |
+          python - <<'PY'
+          import os
+
+          from pnu_event_gate.delivery import SMTPConfig, send_email
+
+          receipt = send_email(
+              config=SMTPConfig.from_env(),
+              recipient=os.environ["PNU_EMAIL_TO"],
+              content={
+                  "subject": "PNU Notice Agent SMTP test",
+                  "body_text": (
+                      "SMTP delivery is configured correctly.\n\n"
+                      "This message was sent by the manual GitHub Actions smoke test."
+                  ),
+              },
+          )
+          print(f"SMTP smoke test completed: {receipt['status']}")
+          PY
