@@ -35,7 +35,7 @@ pnu-notice-agent-tools
   -> check collapses same-notice duplicate groups
   -> queues matched candidates durably in local SQLite state
   -> resolve can materialize one selected notice's official page and attachments locally
-  -> optionally compiles watch requests and performs grounded final analysis with NVIDIA endpoints
+  -> optionally compiles watch requests and performs grounded final analysis with Gemini or NVIDIA
   -> parses text, PDF, XLSX, CSV, ZIP, and HWP when the optional readers are available
   -> transcribes image-only pages with the configured multimodal endpoint
   -> does not persist or mirror full notice bodies or attachment contents
@@ -65,7 +65,7 @@ before an agent or automation step handles it.
 
 The deterministic scan and candidate gate remain LLM-free. Optional commands
 can compile a natural-language request once, extract selected candidate
-materials, call NVIDIA's hosted chat/embedding endpoints for grounded final
+materials, call the configured hosted chat/embedding endpoints for grounded final
 judgment, and send matched results through SMTP.
 
 `events.json` events are compact routing records. By default, this helper follows
@@ -189,15 +189,17 @@ connection URI with TLS enabled, and configure these repository secrets:
 | Secret | Purpose |
 | --- | --- |
 | `PNU_DATABASE_URL` | Supabase Postgres connection URI |
-| `NVIDIA_API_KEY` | Watch compilation and final analysis |
+| `GEMINI_API_KEY` | Default watch compilation and final analysis provider |
+| `NVIDIA_API_KEY` | Optional NVIDIA fallback provider |
 | `PNU_EMAIL_TO` | Default recipient when a profile has no `delivery.email_to` |
 | `PNU_SMTP_HOST` | SMTP server |
 | `PNU_SMTP_FROM` | Sender address |
 | `PNU_SMTP_USERNAME` | Optional SMTP username |
 | `PNU_SMTP_PASSWORD` | Optional SMTP password |
 
-Optional repository variables are `PNU_SMTP_PORT` (default `587`) and
-`PNU_SMTP_STARTTLS` (default `true`). The worker creates and migrates its tables
+Optional repository variables are `PNU_AI_PROVIDER` (default `gemini`),
+`PNU_SMTP_PORT` (default `587`), and `PNU_SMTP_STARTTLS` (default `true`).
+The worker creates and migrates its tables
 on connection. The database role therefore needs schema/table creation and normal
 read/write privileges.
 
@@ -415,14 +417,17 @@ small evidence set, and asks the configured model for a citation-constrained
 decision. When given only `--url`, `resolve` derives candidate attachment links
 from the official detail page when possible.
 
-## Optional NVIDIA Analysis
+## Optional Hosted AI Analysis
 
-Install attachment readers and set an NVIDIA trial API key in the environment:
+Install attachment readers and set a Gemini API key in the environment:
 
 ```bash
 python3 -m pip install -e ".[analysis]"
-export NVIDIA_API_KEY="..."
+export GEMINI_API_KEY="..."
 ```
+
+Gemini is the default provider. NVIDIA remains available with
+`--provider nvidia` and `NVIDIA_API_KEY`.
 
 Compile and store a broad deterministic candidate profile:
 

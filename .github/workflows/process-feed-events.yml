@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 25
     env:
       PNU_DATABASE_URL: ${{ secrets.PNU_DATABASE_URL }}
+      PNU_AI_PROVIDER: ${{ vars.PNU_AI_PROVIDER || 'gemini' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       PNU_EMAIL_TO: ${{ secrets.PNU_EMAIL_TO }}
       PNU_SMTP_HOST: ${{ secrets.PNU_SMTP_HOST }}
@@ -50,6 +52,12 @@ jobs:
         run: |
           if [[ -z "$PNU_DATABASE_URL" ]]; then
             echo "::warning::PNU_DATABASE_URL is not configured; watch processing is skipped."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$PNU_AI_PROVIDER" == "gemini" && -z "$GEMINI_API_KEY" ]]; then
+            echo "::warning::GEMINI_API_KEY is not configured; watch processing is skipped."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$PNU_AI_PROVIDER" == "nvidia" && -z "$NVIDIA_API_KEY" ]]; then
+            echo "::warning::NVIDIA_API_KEY is not configured; watch processing is skipped."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
@@ -76,6 +84,7 @@ jobs:
           python run.py run-watch-cycle \
             --db "$PNU_DATABASE_URL" \
             --events-url "$EVENTS_URL" \
+            --provider "$PNU_AI_PROVIDER" \
             --process-limit 20 \
             --send-limit 20 \
             --max-attempts 5 \

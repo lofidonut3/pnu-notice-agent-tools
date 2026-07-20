@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+
+from .ai import AIAPIError, extract_json_object as _extract_json_object, read_environment_value
 
 
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -14,7 +15,7 @@ DEFAULT_CHAT_MODEL = "minimaxai/minimax-m3"
 DEFAULT_EMBEDDING_MODEL = "nvidia/nemotron-3-embed-1b"
 
 
-class NvidiaAPIError(RuntimeError):
+class NvidiaAPIError(AIAPIError):
     """Raised when a NVIDIA hosted endpoint cannot return a valid response."""
 
 
@@ -24,6 +25,7 @@ class NvidiaClient:
     base_url: str = DEFAULT_NVIDIA_BASE_URL
     timeout_seconds: int = 120
     max_attempts: int = 3
+    provider: str = "nvidia"
 
     @classmethod
     def from_env(
@@ -140,40 +142,7 @@ class NvidiaClient:
 
 
 def extract_json_object(value: str) -> Any:
-    text = value.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(text):
-        if character not in "{[":
-            continue
-        try:
-            parsed, _end = decoder.raw_decode(text[index:])
-            return parsed
-        except json.JSONDecodeError:
-            continue
-    raise NvidiaAPIError("model response does not contain valid JSON")
-
-
-def read_environment_value(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    if value or os.name != "nt":
-        return value
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            registry_value, _kind = winreg.QueryValueEx(key, name)
-        return str(registry_value).strip()
-    except (FileNotFoundError, OSError):
-        return ""
+        return _extract_json_object(value)
+    except AIAPIError as error:
+        raise NvidiaAPIError(str(error)) from error

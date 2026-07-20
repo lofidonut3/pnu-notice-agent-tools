@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from .backtest import run_backtest
+from .ai import (
+    AIClient,
+    SUPPORTED_AI_PROVIDERS,
+    create_ai_client,
+    resolve_ai_runtime,
+)
 from .analysis import (
     DEFAULT_MAX_VISUAL_PAGES,
     compile_watch_request,
@@ -40,7 +46,6 @@ from .events import (
 )
 from .evidence import evidence_from_materials, load_evidence_json
 from .matcher import match_event
-from .nvidia import DEFAULT_CHAT_MODEL, DEFAULT_EMBEDDING_MODEL, NvidiaClient
 from .profiles import load_profile, normalize_profile
 from .scan import run_scan
 from .state import Cursor, EventGateState
@@ -210,7 +215,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cycle.add_argument("--max-attempts", type=int, default=5)
     cycle.add_argument("--no-embeddings", action="store_true")
     cycle.add_argument("--max-visual-pages", type=int, default=DEFAULT_MAX_VISUAL_PAGES)
-    cycle.add_argument("--api-key-env", default="NVIDIA_API_KEY")
+    _add_ai_args(cycle)
     cycle.add_argument("--email-to", default=os.environ.get("PNU_EMAIL_TO"))
     cycle.add_argument("--smtp-env-prefix", default="PNU_SMTP_")
     cycle.add_argument(
@@ -235,7 +240,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     profile_compile = profile_subparsers.add_parser(
         "compile",
-        help="Compile a natural-language request into a deterministic watch profile with NVIDIA.",
+        help="Compile a natural-language request into a deterministic watch profile with AI.",
     )
     _add_db_arg(profile_compile)
     profile_compile.add_argument("--watch-id", required=True)
@@ -243,11 +248,7 @@ def _build_parser() -> argparse.ArgumentParser:
     profile_request = profile_compile.add_mutually_exclusive_group(required=True)
     profile_request.add_argument("--request")
     profile_request.add_argument("--request-file")
-    profile_compile.add_argument(
-        "--chat-model",
-        default=os.environ.get("NVIDIA_CHAT_MODEL", DEFAULT_CHAT_MODEL),
-    )
-    profile_compile.add_argument("--api-key-env", default="NVIDIA_API_KEY")
+    _add_ai_args(profile_compile, include_embedding=False)
     profile_compile.add_argument("--candidate-threshold", type=int, default=2)
     profile_compile.add_argument(
         "--email-to",
@@ -376,7 +377,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     analyze = subparsers.add_parser(
         "analyze",
-        help="Analyze extracted notice evidence with NVIDIA hosted models.",
+        help="Analyze extracted notice evidence with a hosted AI provider.",
     )
     request_input = analyze.add_mutually_exclusive_group(required=True)
     request_input.add_argument("--request", help="Natural-language watch request.")
@@ -404,21 +405,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Pre-extracted evidence bundle JSON.",
     )
     analyze.add_argument("--notice-json", help="Optional notice metadata JSON.")
-    analyze.add_argument(
-        "--chat-model",
-        default=os.environ.get("NVIDIA_CHAT_MODEL", DEFAULT_CHAT_MODEL),
-        help="NVIDIA catalog chat model id.",
-    )
-    analyze.add_argument(
-        "--embedding-model",
-        default=os.environ.get("NVIDIA_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
-        help="NVIDIA catalog embedding model id.",
-    )
-    analyze.add_argument(
-        "--api-key-env",
-        default="NVIDIA_API_KEY",
-        help="Environment variable containing the NVIDIA API key.",
-    )
+    _add_ai_args(analyze)
     analyze.add_argument(
         "--no-embeddings",
         action="store_true",
@@ -435,7 +422,7 @@ def _build_parser() -> argparse.ArgumentParser:
     analyze.add_argument(
         "--dry-run",
         action="store_true",
-        help="Extract and print evidence without calling NVIDIA endpoints.",
+        help="Extract and print evidence without calling hosted AI endpoints.",
     )
     analyze.add_argument(
         "--email-to",
@@ -519,6 +506,41 @@ def _add_db_arg(parser: argparse.ArgumentParser) -> None:
         "--db",
         default=os.environ.get("PNU_DATABASE_URL", str(DEFAULT_DB_PATH)),
         help="SQLite path or Postgres connection URL (defaults to PNU_DATABASE_URL when set).",
+    )
+
+
+def _add_ai_args(
+    parser: argparse.ArgumentParser,
+    *,
+    include_embedding: bool = True,
+) -> None:
+    parser.add_argument(
+        "--provider",
+        choices=SUPPORTED_AI_PROVIDERS,
+        default=os.environ.get("PNU_AI_PROVIDER", "gemini"),
+        help="Hosted AI provider (default: gemini).",
+    )
+    parser.add_argument(
+        "--chat-model",
+        help="Provider chat model id; defaults to the provider-specific environment or built-in model.",
+    )
+    if include_embedding:
+        parser.add_argument(
+            "--embedding-model",
+            help="Provider embedding model id; defaults to the provider-specific environment or built-in model.",
+        )
+    parser.add_argument(
+        "--api-key-env",
+        help="Environment variable containing the provider API key.",
+    )
+
+
+def _ai_runtime_from_args(args: argparse.Namespace):
+    return resolve_ai_runtime(
+        provider=args.provider,
+        api_key_env=args.api_key_env,
+        chat_model=args.chat_model,
+        embedding_model=getattr(args, "embedding_model", None),
     )
 
 
@@ -659,9 +681,10 @@ def _run_watch_cycle(args: argparse.Namespace) -> int:
         raise SystemExit("--max-visual-pages must not be negative")
 
     smtp_config: SMTPConfig | None = None
+    runtime = _ai_runtime_from_args(args)
 
-    def client_factory() -> NvidiaClient:
-        return NvidiaClient.from_env(args.api_key_env)
+    def client_factory() -> AIClient:
+        return create_ai_client(runtime)
 
     def sender(recipient: str, content: dict[str, Any]) -> dict[str, Any]:
         nonlocal smtp_config
@@ -683,6 +706,8 @@ def _run_watch_cycle(args: argparse.Namespace) -> int:
             max_attempts=args.max_attempts,
             use_embeddings=not args.no_embeddings,
             max_visual_pages=args.max_visual_pages,
+            chat_model=runtime.chat_model,
+            embedding_model=runtime.embedding_model,
         )
     _print_json(payload, pretty=args.pretty)
     return 0
@@ -700,8 +725,9 @@ def _profile(args: argparse.Namespace) -> int:
         )
         if not request:
             raise SystemExit("watch request must not be empty")
-        client = NvidiaClient.from_env(args.api_key_env)
-        intent = compile_watch_request(client, request=request, model=args.chat_model)
+        runtime = _ai_runtime_from_args(args)
+        client = create_ai_client(runtime)
+        intent = compile_watch_request(client, request=request, model=runtime.chat_model)
         profile = normalize_profile(
             intent_to_profile(
                 intent,
@@ -714,8 +740,8 @@ def _profile(args: argparse.Namespace) -> int:
             profile["delivery"] = {"email_to": args.email_to}
         payload: dict[str, Any] = {
             "type": "pnu_notice_profile_compilation",
-            "provider": "nvidia",
-            "model": args.chat_model,
+            "provider": runtime.provider,
+            "model": runtime.chat_model,
             "stored": False,
             "profile": profile,
         }
@@ -1010,14 +1036,15 @@ def _analyze(args: argparse.Namespace) -> int:
         )
         return 0
 
-    client = NvidiaClient.from_env(args.api_key_env)
+    runtime = _ai_runtime_from_args(args)
+    client = create_ai_client(runtime)
     payload = run_ai_analysis(
         client=client,
         request=request,
         evidence=evidence,
         notice=notice,
-        chat_model=args.chat_model,
-        embedding_model=args.embedding_model,
+        chat_model=runtime.chat_model,
+        embedding_model=runtime.embedding_model,
         use_embeddings=not args.no_embeddings,
         lexical_pool_size=args.lexical_pool_size,
         top_k=args.top_k,

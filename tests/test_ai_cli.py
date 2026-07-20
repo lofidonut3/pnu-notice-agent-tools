@@ -89,12 +89,7 @@ def test_analyze_loads_compiled_profile_from_sqlite(
 
     client = DecisionClient()
 
-    class ClientFactory:
-        @staticmethod
-        def from_env(_api_key_env: str) -> DecisionClient:
-            return client
-
-    monkeypatch.setattr("pnu_event_gate.cli.NvidiaClient", ClientFactory)
+    monkeypatch.setattr("pnu_event_gate.cli.create_ai_client", lambda _runtime: client)
 
     assert main(
         [

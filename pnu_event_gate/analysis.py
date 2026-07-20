@@ -4,7 +4,9 @@ import base64
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
+
+from .ai import AIAPIError, AIClient
 
 from .evidence import (
     VISUAL_PENDING_TEXT,
@@ -15,26 +17,7 @@ from .evidence import (
     normalize_text,
     redact_sensitive_text,
 )
-from .nvidia import DEFAULT_CHAT_MODEL, DEFAULT_EMBEDDING_MODEL, NvidiaAPIError
-
-
-class AIClient(Protocol):
-    def chat_json(
-        self,
-        *,
-        messages: list[dict[str, Any]],
-        model: str,
-        max_tokens: int,
-        temperature: float,
-    ) -> dict[str, Any]: ...
-
-    def embeddings(
-        self,
-        texts: list[str],
-        *,
-        model: str,
-        input_type: str,
-    ) -> list[list[float]]: ...
+from .gemini import DEFAULT_CHAT_MODEL, DEFAULT_EMBEDDING_MODEL
 
 
 @dataclass(frozen=True)
@@ -117,7 +100,7 @@ def run_ai_analysis(
     )
     return {
         "type": "pnu_notice_ai_analysis",
-        "provider": "nvidia",
+        "provider": getattr(client, "provider", "unknown"),
         "models": {
             "chat": chat_model,
             "embedding": embedding_model if use_embeddings else None,
@@ -560,7 +543,7 @@ def rank_evidence(
             model=embedding_model,
             input_type="passage",
         )
-    except NvidiaAPIError as error:
+    except AIAPIError as error:
         fallback = [
             RankedEvidence(
                 chunk=chunk,

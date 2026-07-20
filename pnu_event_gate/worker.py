@@ -5,7 +5,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from .analysis import AIClient, DEFAULT_MAX_VISUAL_PAGES, run_ai_analysis
+from .ai import AIClient
+from .analysis import DEFAULT_MAX_VISUAL_PAGES, run_ai_analysis
+from .gemini import DEFAULT_CHAT_MODEL, DEFAULT_EMBEDDING_MODEL
 from .content import (
     DEFAULT_MAX_FILE_BYTES,
     DEFAULT_MAX_TEXT_CHARS,
@@ -36,6 +38,8 @@ def run_watch_cycle(
     max_attempts: int = 5,
     use_embeddings: bool = True,
     max_visual_pages: int = DEFAULT_MAX_VISUAL_PAGES,
+    chat_model: str = DEFAULT_CHAT_MODEL,
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     if process_limit <= 0 or send_limit <= 0:
         raise ValueError("process and send limits must be greater than zero")
@@ -61,6 +65,8 @@ def run_watch_cycle(
                 max_attempts=max_attempts,
                 use_embeddings=use_embeddings,
                 max_visual_pages=max_visual_pages,
+                chat_model=chat_model,
+                embedding_model=embedding_model,
             )
         )
 
@@ -91,6 +97,8 @@ def process_candidate(
     max_attempts: int,
     use_embeddings: bool,
     max_visual_pages: int,
+    chat_model: str = DEFAULT_CHAT_MODEL,
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     started_at = now_iso()
     store.update_candidate(candidate["candidate_id"], status="processing", now=started_at)
@@ -133,6 +141,8 @@ def process_candidate(
             use_embeddings=use_embeddings,
             max_visual_pages=max_visual_pages,
             compiled_intent=intent,
+            chat_model=chat_model,
+            embedding_model=embedding_model,
         )
         classification = analysis["decision"]["classification"]
         recipient = profile_email(profile) or default_email_to
