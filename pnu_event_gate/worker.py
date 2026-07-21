@@ -184,6 +184,15 @@ def process_candidate(
                     result=analysis,
                     error="matched decision has no email recipient",
                 )
+                persist_user_notification(
+                    store=store,
+                    profile=profile,
+                    candidate=candidate,
+                    analysis=analysis,
+                    delivery_status="needs_attention",
+                    error="matched decision has no email recipient",
+                    now=now_iso(),
+                )
             else:
                 notification = build_notification(
                     candidate=candidate,
@@ -192,6 +201,19 @@ def process_candidate(
                     now=now_iso(),
                 )
                 queued = store.enqueue_notification(notification)
+                outbox = store.get_notification(notification["outbox_id"])
+                persist_user_notification(
+                    store=store,
+                    profile=profile,
+                    candidate=candidate,
+                    analysis=analysis,
+                    outbox_id=notification["outbox_id"],
+                    delivery_status=(
+                        "queued" if outbox["status"] == "pending" else str(outbox["status"])
+                    ),
+                    error=outbox.get("last_error"),
+                    now=now_iso(),
+                )
                 store.update_candidate(
                     candidate["candidate_id"],
                     status="completed",
@@ -205,6 +227,15 @@ def process_candidate(
                 now=now_iso(),
                 result=analysis,
                 error="analysis remained uncertain",
+            )
+            persist_user_notification(
+                store=store,
+                profile=profile,
+                candidate=candidate,
+                analysis=analysis,
+                delivery_status="not_applicable",
+                error="analysis remained uncertain",
+                now=now_iso(),
             )
         else:
             store.update_candidate(
@@ -300,6 +331,12 @@ def deliver_due_notifications(
         try:
             metadata = sender(item["recipient"], item["payload"])
             sent = store.mark_notification_sent(item["outbox_id"], now=attempted_at)
+            store.update_user_notification_delivery(
+                item["outbox_id"],
+                status="sent",
+                now=attempted_at,
+                sent_at=attempted_at,
+            )
             store.record_receipt(
                 {
                     "receipt_id": "receipt_" + item["outbox_id"],
@@ -323,6 +360,12 @@ def deliver_due_notifications(
                 error=f"{type(error).__name__}: {error}",
                 max_attempts=max_attempts,
             )
+            store.update_user_notification_delivery(
+                item["outbox_id"],
+                status=failed["status"],
+                now=attempted_at,
+                error=failed["last_error"],
+            )
             store.commit()
             results.append(
                 {
@@ -340,6 +383,72 @@ def profile_email(profile: dict[str, Any]) -> str | None:
         return None
     value = str(delivery.get("email_to") or "").strip()
     return value or None
+
+
+def persist_user_notification(
+    *,
+    store: NoticeStore,
+    profile: dict[str, Any],
+    candidate: dict[str, Any],
+    analysis: dict[str, Any],
+    delivery_status: str,
+    now: str,
+    outbox_id: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any] | None:
+    owner = profile.get("owner") or {}
+    if not isinstance(owner, dict) or owner.get("type") != "web_request":
+        return None
+    user_id = str(owner.get("user_id") or "").strip()
+    request_id = str(owner.get("request_id") or "").strip()
+    if not user_id or not request_id:
+        return None
+
+    decision = analysis.get("decision") or {}
+    classification = str(decision.get("classification") or "uncertain")
+    if classification not in {"matched", "uncertain"}:
+        return None
+    notice = candidate.get("event") or {}
+    selected = (analysis.get("retrieval") or {}).get("selected") or []
+    evidence = []
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        evidence.append(
+            {
+                "id": str(item.get("id") or ""),
+                "source_name": str(item.get("source_name") or "공지 본문"),
+                "kind": str(item.get("kind") or "text"),
+                "page": item.get("page"),
+                "row": item.get("row"),
+            }
+        )
+    identity = "alert_" + hashlib.sha256(
+        str(candidate["candidate_id"]).encode("utf-8")
+    ).hexdigest()[:24]
+    return store.upsert_user_notification(
+        {
+            "id": identity,
+            "outbox_id": outbox_id,
+            "user_id": user_id,
+            "watch_request_id": request_id,
+            "watch_id": candidate["watch_id"],
+            "candidate_id": candidate["candidate_id"],
+            "event_id": candidate["event_id"],
+            "notice_id": candidate.get("notice_id"),
+            "classification": classification,
+            "delivery_status": delivery_status,
+            "title": str(notice.get("title") or "부산대학교 공지 판정 결과"),
+            "summary": str(decision.get("summary") or "판정 결과를 확인해 주세요."),
+            "notice_url": notice.get("url") or notice.get("detail_url"),
+            "facts": decision.get("facts") or [],
+            "evidence": evidence,
+            "last_error": error,
+            "created_at": now,
+            "updated_at": now,
+            "sent_at": now if delivery_status == "sent" else None,
+        }
+    )
 
 
 def _pending_candidates(store: NoticeStore) -> list[dict[str, Any]]:

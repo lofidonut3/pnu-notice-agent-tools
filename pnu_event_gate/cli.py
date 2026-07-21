@@ -46,6 +46,7 @@ from .events import (
 )
 from .evidence import evidence_from_materials, load_evidence_json
 from .matcher import match_event
+from .monitoring import monitor_service
 from .profiles import load_profile, normalize_profile
 from .scan import run_scan
 from .state import Cursor, EventGateState
@@ -64,6 +65,7 @@ COMMANDS = {
     "scan",
     "run-watch-cycle",
     "process-watch-requests",
+    "monitor-service",
     "profile",
     "candidate",
     "status",
@@ -94,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_watch_cycle(args)
     if args.command == "process-watch-requests":
         return _process_watch_requests(args)
+    if args.command == "monitor-service":
+        return _monitor_service(args)
     if args.command == "profile":
         return _profile(args)
     if args.command == "candidate":
@@ -237,6 +241,16 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_ai_args(request_worker, include_embedding=False)
     request_worker.add_argument("--limit", type=int, default=20)
     request_worker.add_argument("--pretty", action="store_true")
+
+    monitor = subparsers.add_parser(
+        "monitor-service",
+        help="Evaluate runtime freshness and notify the operator about new incidents.",
+    )
+    _add_db_arg(monitor)
+    monitor.add_argument("--operator-email", default=os.environ.get("PNU_EMAIL_TO"))
+    monitor.add_argument("--smtp-env-prefix", default="PNU_SMTP_")
+    monitor.add_argument("--no-send", action="store_true")
+    monitor.add_argument("--pretty", action="store_true")
 
     ack = subparsers.add_parser("ack", help="Advance cursor after downstream handling succeeds.")
     _add_common_args(ack)
@@ -738,6 +752,25 @@ def _process_watch_requests(args: argparse.Namespace) -> int:
             client_factory=client_factory,
             chat_model=runtime.chat_model,
             limit=args.limit,
+        )
+    _print_json(payload, pretty=args.pretty)
+    return 0
+
+
+def _monitor_service(args: argparse.Namespace) -> int:
+    smtp_config: SMTPConfig | None = None
+
+    def sender(recipient: str, content: dict[str, str]) -> dict[str, Any]:
+        nonlocal smtp_config
+        if smtp_config is None:
+            smtp_config = SMTPConfig.from_env(args.smtp_env_prefix)
+        return send_email(config=smtp_config, recipient=recipient, content=content)
+
+    with NoticeStore(args.db) as store:
+        payload = monitor_service(
+            store=store,
+            operator_email=args.operator_email,
+            sender=None if args.no_send else sender,
         )
     _print_json(payload, pretty=args.pretty)
     return 0

@@ -237,3 +237,94 @@ def test_run_ai_analysis_reuses_compiled_intent_without_compiler_call() -> None:
 
     assert client.chat_calls == 1
     assert result["intent"]["event_type"] == "course_cancelled"
+
+
+def test_predicate_guard_rejects_course_values_from_different_rows() -> None:
+    decision = validate_decision(
+        {
+            "classification": "matched",
+            "confidence": 0.94,
+            "summary": "폐강 대상입니다.",
+            "facts": [{"text": "폐강", "evidence_ids": ["E001", "E002"]}],
+            "evidence_ids": ["E001", "E002"],
+        },
+        valid_ids={"E001", "E002"},
+        intent={
+            "event_type": "course_cancelled",
+            "entities": [
+                {"type": "course", "value": "데이터베이스", "required": True},
+                {"type": "section", "value": "001", "required": True},
+            ],
+        },
+        evidence_by_id={
+            "E001": EvidenceChunk(id="E001", source_name="폐강 목록", text="데이터베이스 002"),
+            "E002": EvidenceChunk(id="E002", source_name="폐강 목록", text="알고리즘 001"),
+        },
+    )
+
+    assert decision["classification"] == "uncertain"
+    assert any("같은 행" in item for item in decision["missing_information"])
+
+
+def test_predicate_guard_accepts_coupled_course_cancellation_evidence() -> None:
+    decision = validate_decision(
+        {
+            "classification": "matched",
+            "confidence": 0.94,
+            "summary": "폐강 대상입니다.",
+            "facts": [{"text": "폐강", "evidence_ids": ["E001"]}],
+            "evidence_ids": ["E001"],
+        },
+        valid_ids={"E001"},
+        intent={
+            "event_type": "course_cancelled",
+            "entities": [
+                {"type": "course", "value": "데이터베이스", "required": True},
+                {"type": "section", "value": "001", "required": True},
+            ],
+        },
+        evidence_by_id={
+            "E001": EvidenceChunk(
+                id="E001",
+                source_name="폐강 강좌 목록",
+                text="데이터베이스 | 001 | 폐강",
+            ),
+        },
+    )
+
+    assert decision["classification"] == "matched"
+
+
+def test_predicate_guard_allows_time_entity_in_separate_citation() -> None:
+    decision = validate_decision(
+        {
+            "classification": "matched",
+            "confidence": 0.96,
+            "summary": "폐강 목록에서 확인했습니다.",
+            "facts": [{"text": "데이터베이스 001분반 폐강", "evidence_ids": ["E001"]}],
+            "evidence_ids": ["E001", "E002"],
+        },
+        valid_ids={"E001", "E002"},
+        intent={
+            "event_type": "course_cancelled",
+            "entities": [
+                {"type": "course", "value": "데이터베이스", "required": True},
+                {"type": "section", "value": "001", "required": True},
+                {"type": "year", "value": "2026", "required": True},
+            ],
+        },
+        evidence_by_id={
+            "E001": EvidenceChunk(
+                id="E001",
+                source_name="폐강 강좌 목록",
+                text="데이터베이스 | 001 | 폐강",
+            ),
+            "E002": EvidenceChunk(
+                id="E002",
+                source_name="공지 제목",
+                text="2026 여름계절수업 폐강 안내",
+            ),
+        },
+    )
+
+    assert decision["classification"] == "matched"

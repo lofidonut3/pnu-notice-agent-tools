@@ -370,7 +370,7 @@ The current linear implementation remains useful for end-to-end quality validati
 but it is a transitional state. Migration will preserve existing feed and extraction
 behavior while changing ownership of cached artifacts and decisions.
 
-### Implemented through the 2026-07-20 iteration
+### Implemented through the 2026-07-21 iteration
 
 - The feed publishes valid healthy-source changes even when non-critical sources
   are temporarily degraded, while size and structural checks remain blocking.
@@ -405,29 +405,45 @@ behavior while changing ownership of cached artifacts and decisions.
   their own requests; a separate lightweight worker compiles pending requests into
   private versioned watch profiles without exposing runtime credentials or internal
   state to the browser.
+- Watch create, edit, pause, and resume actions invoke an authenticated Edge
+  Function that emits a `pnu-watch-requested` wake hint. The ten-minute compiler
+  schedule remains the durable recovery path when dispatch is unavailable.
+- Per-account database guards bind delivery addresses to the authenticated account,
+  cap enabled watches, and rate-limit create/edit compilation requests. These checks
+  run in Postgres so they cannot be bypassed by a modified browser client.
+- Final decisions are persisted as a user-owned notification projection containing
+  the result, delivery state, normalized facts, and compact evidence locations. The
+  web app exposes this history without granting browser access to internal runtime
+  tables or full extracted document content.
+- Matched decisions must cite evidence containing required entities and predicate
+  markers. Course and section identifiers must occur in the same cited row or
+  paragraph, while state and deadline predicates require corresponding status or
+  date evidence. Unsupported matches are downgraded to `uncertain`.
+- An hourly health monitor evaluates feed and worker freshness, degraded runs,
+  failed requests, and exhausted delivery retries. It stores a public service-health
+  projection, deduplicates private operator incidents, and emails only newly opened
+  or reopened incidents.
 
 ### Still required for the target architecture
 
 - Share extracted notice artifacts and embeddings across all users by content hash,
   rather than only reusing downloaded files in a local materials directory.
-- Add complete predicate-specific evaluators and stronger fact-level citation
-  validation, especially versioned course-list comparisons.
-- Add provider abstraction, quotas, detailed production metrics, and operator
-  alerts. Durable run audit now supplies the base data but does not yet notify an
-  operator or measure model cost, latency, and extraction quality.
+- Add complete predicate-specific evaluators beyond the current conservative
+  evidence guard, especially versioned course-list comparisons and exact capacity
+  changes.
+- Add detailed metrics for model cost, latency, extraction quality, gate recall,
+  and validation failures. The current health monitor covers availability and stuck
+  work, not product-quality trends.
+- Define notification retention, pagination, and account deletion behavior before
+  exposing more than the current latest 100 records.
 
 ### P0: Required before broader use
 
-- Persist and reuse versioned `WatchSpec` records.
-- Add notice and attachment material caching by content hash.
-- Emit an outbound wake signal after durable feed publication.
-- Add per-source known-ID pagination catch-up and response plausibility guards.
-- Introduce specialized predicate evaluators.
-- Reduce routine evidence input to the stated token budgets.
-- Use local OCR first and VLM only as a targeted fallback.
-- Resolve attachment manifests before selectively downloading large attachment sets.
-- Strengthen citation validation to verify predicate facts.
-- Add a durable notification outbox with idempotency and retries.
+- Add shared notice and attachment material caching by content hash.
+- Introduce specialized evaluators for predicates that require exact version or
+  numeric comparisons.
+- Run recurring production fixtures and incident drills against real notice formats,
+  including large spreadsheets, scanned PDFs, and temporary source outages.
 
 ### P1: Scale and resilience
 

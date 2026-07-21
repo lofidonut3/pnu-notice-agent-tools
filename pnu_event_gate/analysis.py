@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -632,7 +633,12 @@ Schema:
         max_tokens=1800,
         temperature=0.0,
     )
-    return validate_decision(payload, valid_ids={item.chunk.id for item in ranked_evidence})
+    return validate_decision(
+        payload,
+        valid_ids={item.chunk.id for item in ranked_evidence},
+        intent=intent,
+        evidence_by_id={item.chunk.id: item.chunk for item in ranked_evidence},
+    )
 
 
 def validate_intent(payload: dict[str, Any], *, request: str) -> dict[str, Any]:
@@ -676,6 +682,8 @@ def validate_decision(
     payload: dict[str, Any],
     *,
     valid_ids: set[str],
+    intent: dict[str, Any] | None = None,
+    evidence_by_id: dict[str, EvidenceChunk] | None = None,
 ) -> dict[str, Any]:
     classification = str(payload.get("classification") or "uncertain")
     if classification not in {"matched", "not_matched", "uncertain"}:
@@ -704,7 +712,7 @@ def validate_decision(
         classification = "uncertain"
         confidence = min(confidence, 0.49)
     summary = str(payload.get("summary") or "근거가 충분하지 않습니다.").strip()
-    return {
+    decision = {
         "schema_version": "watch_decision.v1",
         "classification": classification,
         "confidence": round(confidence, 4),
@@ -713,6 +721,105 @@ def validate_decision(
         "evidence_ids": evidence_ids,
         "missing_information": _string_list(payload.get("missing_information")),
     }
+    return enforce_predicate_evidence(
+        decision,
+        intent=intent or {},
+        evidence_by_id=evidence_by_id or {},
+    )
+
+
+def enforce_predicate_evidence(
+    decision: dict[str, Any],
+    *,
+    intent: dict[str, Any],
+    evidence_by_id: dict[str, EvidenceChunk],
+) -> dict[str, Any]:
+    if decision["classification"] != "matched":
+        return decision
+
+    cited = [
+        evidence_by_id[evidence_id]
+        for evidence_id in decision["evidence_ids"]
+        if evidence_id in evidence_by_id
+    ]
+    normalized_chunks = [
+        normalize_text(f"{chunk.source_name} {chunk.text}").replace(" ", "")
+        for chunk in cited
+    ]
+    required_entities = [
+        entity
+        for entity in intent.get("entities") or []
+        if isinstance(entity, dict) and entity.get("required", True)
+    ]
+    required_values = [str(entity.get("value") or "").strip() for entity in required_entities]
+    normalized_values = [normalize_text(value).replace(" ", "") for value in required_values]
+    failures: list[str] = []
+
+    for value, normalized_value in zip(required_values, normalized_values, strict=True):
+        if normalized_value and not any(normalized_value in text for text in normalized_chunks):
+            failures.append(f"필수 조건 '{value}'이 인용 근거에서 확인되지 않습니다.")
+
+    event_type = str(intent.get("event_type") or "other")
+    if event_type in {"course_cancelled", "course_changed"}:
+        course_values = [
+            normalize_text(str(entity.get("value") or "")).replace(" ", "")
+            for entity in required_entities
+            if any(
+                label in str(entity.get("type") or "").casefold()
+                for label in ("course", "subject", "class_name")
+            )
+        ]
+        section_values = [
+            normalize_text(str(entity.get("value") or "")).replace(" ", "")
+            for entity in required_entities
+            if any(
+                label in str(entity.get("type") or "").casefold()
+                for label in ("section", "division", "class_number")
+            )
+        ]
+        has_same_chunk_pair = any(
+            any(course in text for course in course_values)
+            and any(section in text for section in section_values)
+            for text in normalized_chunks
+        )
+        if course_values and section_values and not has_same_chunk_pair:
+            failures.append("강좌명과 분반이 같은 행 또는 문단에서 확인되지 않습니다.")
+
+    markers = {
+        "course_cancelled": ("폐강", "개설취소", "수강취소", "cancelled", "canceled"),
+        "course_changed": ("변경", "정정", "change", "changed"),
+        "result": ("결과", "합격", "선발", "발표", "result"),
+        "availability": ("신청", "접수", "모집", "available", "apply"),
+    }
+    required_markers = markers.get(event_type)
+    if required_markers and not any(
+        any(normalize_text(marker).replace(" ", "") in text for marker in required_markers)
+        for text in normalized_chunks
+    ):
+        failures.append("요청한 상태를 나타내는 표현이 인용 근거에서 확인되지 않습니다.")
+
+    if event_type == "deadline":
+        has_date = any(
+            re.search(r"(?:20\d{2}[./-]\s*)?\d{1,2}[./-]\s*\d{1,2}|\d{1,2}\s*월\s*\d{1,2}\s*일", text)
+            for text in normalized_chunks
+        )
+        if not has_date:
+            failures.append("마감 판정에 필요한 날짜가 인용 근거에서 확인되지 않습니다.")
+
+    if not cited:
+        failures.append("검증 가능한 인용 근거가 없습니다.")
+
+    if failures:
+        return {
+            **decision,
+            "classification": "uncertain",
+            "confidence": min(float(decision["confidence"]), 0.49),
+            "summary": "필수 조건을 근거에서 검증하지 못해 확인이 필요합니다.",
+            "missing_information": list(
+                dict.fromkeys([*decision["missing_information"], *failures])
+            ),
+        }
+    return decision
 
 
 def render_email(

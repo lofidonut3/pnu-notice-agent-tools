@@ -236,8 +236,29 @@ state, and delivery records.
 The lightweight `Process web watch requests` workflow compiles pending requests
 into internal watch profiles and synchronizes pause/resume changes. It runs every
 ten minutes, on manual dispatch, and on the `pnu-watch-requested` repository
-dispatch event. The normal notice-processing workflow continues to own matching,
+dispatch event. The browser requests that event through an authenticated Edge
+Function after create, edit, pause, and resume actions; the schedule recovers any
+missed dispatch. The normal notice-processing workflow continues to own matching,
 analysis, and email delivery.
+
+The dashboard also shows each user's latest alert decisions and delivery states.
+Only compact facts and evidence locations are exposed to the browser. Full extracted
+documents, internal candidates, incidents, and delivery internals remain private.
+Database guards require the recipient to match the signed-in account, limit each
+account to ten enabled watches, and rate-limit repeated compilation requests.
+
+The `Monitor PNU Watch health` workflow runs hourly and checks feed freshness,
+worker freshness, degraded runs, failed requests, and exhausted delivery retries.
+It maintains the dashboard health indicator and sends an operator email only when
+an incident is newly opened or reappears after recovery. Run the same check locally
+with:
+
+```bash
+python3 run.py monitor-service \
+  --db "$PNU_DATABASE_URL" \
+  --operator-email "$PNU_EMAIL_TO" \
+  --pretty
+```
 
 Run the website locally:
 

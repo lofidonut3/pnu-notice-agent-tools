@@ -29,6 +29,11 @@ def test_watch_cycle_queues_before_sending_and_is_idempotent(
                     "exact_terms": ["database", "001"],
                 },
                 "delivery": {"email_to": "student@example.test"},
+                "owner": {
+                    "type": "web_request",
+                    "user_id": "user-1",
+                    "request_id": "request-1",
+                },
             },
             now="2026-07-19T10:00:00+09:00",
         )
@@ -85,6 +90,10 @@ def test_watch_cycle_queues_before_sending_and_is_idempotent(
         assert second["deliveries"] == []
         assert sent == [("student@example.test", "Matched")]
         assert store.status_summary()["outbox"] == {"sent": 1}
+        alerts = store.list_user_notifications(user_id="user-1")
+        assert len(alerts) == 1
+        assert alerts[0]["classification"] == "matched"
+        assert alerts[0]["delivery_status"] == "sent"
         assert store.status_summary()["runs"]["by_status"] == {"ok": 2}
 
 

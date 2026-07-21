@@ -1,0 +1,3 @@
+[functions.dispatch-watch-request]
+verify_jwt = true
+

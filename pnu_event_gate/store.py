@@ -10,7 +10,7 @@ from uuid import uuid4
 from .state import Cursor
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def dumps_json(value: Any) -> str:
@@ -160,6 +160,53 @@ class NoticeStore:
               updated_at text not null,
               sent_at text,
               unique (watch_id, event_id, decision_hash, channel, recipient)
+            );
+
+            create table if not exists user_notifications (
+              id text primary key,
+              outbox_id text unique,
+              user_id text not null,
+              watch_request_id text not null,
+              watch_id text not null,
+              candidate_id text not null unique,
+              event_id text not null,
+              notice_id text,
+              classification text not null,
+              delivery_status text not null,
+              title text not null,
+              summary text not null,
+              notice_url text,
+              facts_json text not null,
+              evidence_json text not null,
+              last_error text,
+              read_at text,
+              created_at text not null,
+              updated_at text not null,
+              sent_at text
+            );
+
+            create table if not exists service_health (
+              id text primary key,
+              status text not null,
+              checked_at text not null,
+              feed_generated_at text,
+              latest_cycle_at text,
+              open_incident_count integer not null default 0,
+              summary text not null,
+              details_json text not null
+            );
+
+            create table if not exists operator_incidents (
+              id text primary key,
+              fingerprint text not null unique,
+              component text not null,
+              severity text not null,
+              status text not null,
+              message text not null,
+              first_seen_at text not null,
+              last_seen_at text not null,
+              notified_at text,
+              resolved_at text
             );
 
             create table if not exists runs (
@@ -637,6 +684,203 @@ class NoticeStore:
             raise KeyError(f"notification not found: {outbox_id}")
         return self._outbox_from_row(row)
 
+    def upsert_user_notification(self, notification: dict[str, Any]) -> dict[str, Any]:
+        self._execute(
+            """
+            insert into user_notifications (
+              id, outbox_id, user_id, watch_request_id, watch_id, candidate_id,
+              event_id, notice_id, classification, delivery_status, title,
+              summary, notice_url, facts_json, evidence_json, last_error,
+              read_at, created_at, updated_at, sent_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(id) do update set
+              outbox_id = excluded.outbox_id,
+              classification = excluded.classification,
+              delivery_status = excluded.delivery_status,
+              title = excluded.title,
+              summary = excluded.summary,
+              notice_url = excluded.notice_url,
+              facts_json = excluded.facts_json,
+              evidence_json = excluded.evidence_json,
+              last_error = excluded.last_error,
+              updated_at = excluded.updated_at,
+              sent_at = excluded.sent_at
+            """,
+            (
+                notification["id"],
+                notification.get("outbox_id"),
+                notification["user_id"],
+                notification["watch_request_id"],
+                notification["watch_id"],
+                notification["candidate_id"],
+                notification["event_id"],
+                notification.get("notice_id"),
+                notification["classification"],
+                notification["delivery_status"],
+                notification["title"],
+                notification["summary"],
+                notification.get("notice_url"),
+                dumps_json(notification.get("facts") or []),
+                dumps_json(notification.get("evidence") or []),
+                notification.get("last_error"),
+                notification.get("read_at"),
+                notification["created_at"],
+                notification["updated_at"],
+                notification.get("sent_at"),
+            ),
+        )
+        return self.get_user_notification(notification["id"])
+
+    def update_user_notification_delivery(
+        self,
+        outbox_id: str,
+        *,
+        status: str,
+        now: str,
+        error: str | None = None,
+        sent_at: str | None = None,
+    ) -> None:
+        self._execute(
+            """
+            update user_notifications set
+              delivery_status = ?, last_error = ?, updated_at = ?,
+              sent_at = coalesce(?, sent_at)
+            where outbox_id = ?
+            """,
+            (status, error, now, sent_at, outbox_id),
+        )
+
+    def get_user_notification(self, notification_id: str) -> dict[str, Any]:
+        row = self._execute(
+            "select * from user_notifications where id = ?",
+            (notification_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"user notification not found: {notification_id}")
+        return self._user_notification_from_row(row)
+
+    def list_user_notifications(self, *, user_id: str | None = None) -> list[dict[str, Any]]:
+        if user_id:
+            rows = self._execute(
+                "select * from user_notifications where user_id = ? order by created_at desc",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = self._execute(
+                "select * from user_notifications order by created_at desc"
+            ).fetchall()
+        return [self._user_notification_from_row(row) for row in rows]
+
+    def sync_operator_incidents(
+        self,
+        issues: list[dict[str, str]],
+        *,
+        now: str,
+    ) -> list[dict[str, Any]]:
+        active_fingerprints = {issue["fingerprint"] for issue in issues}
+        open_rows = self._execute(
+            "select fingerprint from operator_incidents where status = 'open'"
+        ).fetchall()
+        for row in open_rows:
+            fingerprint = str(row["fingerprint"])
+            if fingerprint not in active_fingerprints:
+                self._execute(
+                    """
+                    update operator_incidents
+                    set status = 'resolved', resolved_at = ?, last_seen_at = ?
+                    where fingerprint = ?
+                    """,
+                    (now, now, fingerprint),
+                )
+
+        for issue in issues:
+            existing = self._execute(
+                "select * from operator_incidents where fingerprint = ?",
+                (issue["fingerprint"],),
+            ).fetchone()
+            if existing is None:
+                incident_id = "incident_" + uuid4().hex[:24]
+                self._execute(
+                    """
+                    insert into operator_incidents (
+                      id, fingerprint, component, severity, status, message,
+                      first_seen_at, last_seen_at, notified_at, resolved_at
+                    ) values (?, ?, ?, ?, 'open', ?, ?, ?, null, null)
+                    """,
+                    (
+                        incident_id,
+                        issue["fingerprint"],
+                        issue["component"],
+                        issue["severity"],
+                        issue["message"],
+                        now,
+                        now,
+                    ),
+                )
+                continue
+            reopening = str(existing["status"]) == "resolved"
+            self._execute(
+                """
+                update operator_incidents set
+                  component = ?, severity = ?, status = 'open', message = ?,
+                  first_seen_at = ?, last_seen_at = ?, notified_at = ?, resolved_at = null
+                where fingerprint = ?
+                """,
+                (
+                    issue["component"],
+                    issue["severity"],
+                    issue["message"],
+                    now if reopening else existing["first_seen_at"],
+                    now,
+                    None if reopening else existing["notified_at"],
+                    issue["fingerprint"],
+                ),
+            )
+
+        rows = self._execute(
+            """
+            select * from operator_incidents
+            where status = 'open' and notified_at is null
+            order by severity desc, first_seen_at
+            """
+        ).fetchall()
+        return [self._incident_from_row(row) for row in rows]
+
+    def mark_incidents_notified(self, incident_ids: list[str], *, now: str) -> None:
+        for incident_id in incident_ids:
+            self._execute(
+                "update operator_incidents set notified_at = ? where id = ?",
+                (now, incident_id),
+            )
+
+    def upsert_service_health(self, health: dict[str, Any]) -> None:
+        self._execute(
+            """
+            insert into service_health (
+              id, status, checked_at, feed_generated_at, latest_cycle_at,
+              open_incident_count, summary, details_json
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(id) do update set
+              status = excluded.status,
+              checked_at = excluded.checked_at,
+              feed_generated_at = excluded.feed_generated_at,
+              latest_cycle_at = excluded.latest_cycle_at,
+              open_incident_count = excluded.open_incident_count,
+              summary = excluded.summary,
+              details_json = excluded.details_json
+            """,
+            (
+                health.get("id") or "runtime",
+                health["status"],
+                health["checked_at"],
+                health.get("feed_generated_at"),
+                health.get("latest_cycle_at"),
+                int(health.get("open_incident_count") or 0),
+                health["summary"],
+                dumps_json(health.get("details") or {}),
+            ),
+        )
+
     def start_run(
         self,
         *,
@@ -722,6 +966,12 @@ class NoticeStore:
         watch_request_rows = self._execute(
             "select status, count(*) as count from watch_requests group by status"
         ).fetchall()
+        user_notification_rows = self._execute(
+            "select delivery_status, count(*) as count from user_notifications group by delivery_status"
+        ).fetchall()
+        health_row = self._execute(
+            "select * from service_health where id = 'runtime'"
+        ).fetchone()
         latest_run = self._execute(
             """
             select * from runs
@@ -748,6 +998,11 @@ class NoticeStore:
                 str(row["status"]): int(row["count"])
                 for row in outbox_rows
             },
+            "user_notifications": {
+                str(row["delivery_status"]): int(row["count"])
+                for row in user_notification_rows
+            },
+            "service_health": self._service_health_from_row(health_row) if health_row else None,
             "runs": {
                 "by_status": {
                     str(row["status"]): int(row["count"])
@@ -839,6 +1094,56 @@ class NoticeStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "sent_at": row["sent_at"],
+        }
+
+    def _user_notification_from_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "outbox_id": row["outbox_id"],
+            "user_id": str(row["user_id"]),
+            "watch_request_id": str(row["watch_request_id"]),
+            "watch_id": row["watch_id"],
+            "candidate_id": row["candidate_id"],
+            "event_id": row["event_id"],
+            "notice_id": row["notice_id"],
+            "classification": row["classification"],
+            "delivery_status": row["delivery_status"],
+            "title": row["title"],
+            "summary": row["summary"],
+            "notice_url": row["notice_url"],
+            "facts": loads_json(row["facts_json"], []),
+            "evidence": loads_json(row["evidence_json"], []),
+            "last_error": row["last_error"],
+            "read_at": row["read_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "sent_at": row["sent_at"],
+        }
+
+    def _incident_from_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "fingerprint": row["fingerprint"],
+            "component": row["component"],
+            "severity": row["severity"],
+            "status": row["status"],
+            "message": row["message"],
+            "first_seen_at": row["first_seen_at"],
+            "last_seen_at": row["last_seen_at"],
+            "notified_at": row["notified_at"],
+            "resolved_at": row["resolved_at"],
+        }
+
+    def _service_health_from_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "status": row["status"],
+            "checked_at": row["checked_at"],
+            "feed_generated_at": row["feed_generated_at"],
+            "latest_cycle_at": row["latest_cycle_at"],
+            "open_incident_count": int(row["open_incident_count"] or 0),
+            "summary": row["summary"],
+            "details": loads_json(row["details_json"], {}),
         }
 
     def _run_from_row(self, row: Any) -> dict[str, Any]:
