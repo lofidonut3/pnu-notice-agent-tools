@@ -5,6 +5,36 @@ from pnu_event_gate.state import Cursor
 from pnu_event_gate.store import NoticeStore
 
 
+def test_not_modified_scan_preserves_feed_metadata(tmp_path: Path) -> None:
+    with NoticeStore(tmp_path / "state.sqlite3") as store:
+        store.update_scan_state(
+            cursor=Cursor(last_seen_event_id="event-1", last_seen_at="2026-07-20T10:00:00+09:00"),
+            checked_at="2026-07-20T11:30:00+09:00",
+            feed_generated_at="2026-07-20T11:00:00+09:00",
+            etag="etag-1",
+            last_modified="Mon, 20 Jul 2026 02:00:00 GMT",
+            status="ok",
+            warnings=[],
+        )
+        store.update_scan_state(
+            cursor=store.scan_cursor(),
+            checked_at="2026-07-20T11:40:00+09:00",
+            feed_generated_at=None,
+            etag=None,
+            last_modified=None,
+            status="not_modified",
+            warnings=[],
+        )
+        store.commit()
+
+        scan = store.status_summary()["scan"]
+        assert scan["last_feed_generated_at"] == "2026-07-20T11:00:00+09:00"
+        assert store.http_headers() == {
+            "If-None-Match": "etag-1",
+            "If-Modified-Since": "Mon, 20 Jul 2026 02:00:00 GMT",
+        }
+
+
 def test_monitor_service_records_healthy_snapshot(tmp_path: Path) -> None:
     with NoticeStore(tmp_path / "state.sqlite3") as store:
         store.update_scan_state(

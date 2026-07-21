@@ -287,9 +287,13 @@ class NoticeStore:
               last_seen_event_id = excluded.last_seen_event_id,
               last_seen_at = excluded.last_seen_at,
               last_checked_at = excluded.last_checked_at,
-              last_feed_generated_at = excluded.last_feed_generated_at,
-              http_etag = excluded.http_etag,
-              http_last_modified = excluded.http_last_modified,
+              last_feed_generated_at = coalesce(
+                excluded.last_feed_generated_at, scan_state.last_feed_generated_at
+              ),
+              http_etag = coalesce(excluded.http_etag, scan_state.http_etag),
+              http_last_modified = coalesce(
+                excluded.http_last_modified, scan_state.http_last_modified
+              ),
               last_run_status = excluded.last_run_status,
               warnings_json = excluded.warnings_json
             """,
