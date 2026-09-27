@@ -34,9 +34,10 @@ jobs:
           cache: pip
       - name: Install health monitor
         run: python -m pip install -e ".[worker]"
-      - name: Evaluate health and notify on new incidents
+      - name: Evaluate health without email notifications
         run: |
           python run.py monitor-service \
             --db "$PNU_DATABASE_URL" \
             --operator-email "$PNU_EMAIL_TO" \
+            --no-send \
             --pretty
