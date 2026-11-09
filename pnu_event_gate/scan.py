@@ -72,13 +72,14 @@ def run_scan(
             return None
 
         validate_feed(result.feed)
+        feed_checked_at = result.feed.get("checked_at") or result.feed.get("generated_at")
         previous_cursor = store.scan_cursor()
         if previous_cursor.is_empty() and not include_baseline:
             latest = feed_latest_cursor(result.feed)
             store.update_scan_state(
                 cursor=latest,
                 checked_at=scanned_at,
-                feed_generated_at=result.feed.get("generated_at"),
+                feed_generated_at=feed_checked_at,
                 etag=result.etag,
                 last_modified=result.last_modified,
                 status="baseline",
@@ -136,7 +137,7 @@ def run_scan(
         store.update_scan_state(
             cursor=next_cursor,
             checked_at=scanned_at,
-            feed_generated_at=result.feed.get("generated_at"),
+            feed_generated_at=feed_checked_at,
             etag=result.etag,
             last_modified=result.last_modified,
             status="ok",
@@ -156,7 +157,7 @@ def run_scan(
             "type": "pnu_notice_candidates",
             "events_url": events_url,
             "scanned_at": scanned_at,
-            "feed_generated_at": result.feed.get("generated_at"),
+            "feed_generated_at": feed_checked_at,
             "cursor_status": cursor_status,
             "previous_cursor": previous_cursor.to_json(),
             "next_cursor": next_cursor.to_json(),

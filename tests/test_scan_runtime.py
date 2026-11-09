@@ -10,6 +10,30 @@ from pnu_event_gate.state import Cursor
 from pnu_event_gate.store import NoticeStore
 
 
+@pytest.mark.parametrize("has_heartbeat", [True, False])
+def test_quiet_scan_uses_poll_heartbeat_with_legacy_fallback(tmp_path, has_heartbeat):
+    feed_path = _write_feed(tmp_path)
+    feed = json.loads(feed_path.read_text(encoding="utf-8"))
+    old_generated_at = feed["generated_at"]
+    checked_at = "2026-06-03T18:00:00+09:00"
+    if has_heartbeat:
+        feed["checked_at"] = checked_at
+    feed_path.write_text(json.dumps(feed), encoding="utf-8")
+    with NoticeStore(tmp_path / "heartbeat.sqlite3") as store:
+        run_scan(store=store, events_url=str(feed_path))
+        cursor = store.scan_cursor()
+        assert store.status_summary()["scan"]["last_feed_generated_at"] == (
+            checked_at if has_heartbeat else old_generated_at
+        )
+        next_checked_at = "2026-06-03T19:00:00+09:00"
+        feed["checked_at" if has_heartbeat else "generated_at"] = next_checked_at
+        feed_path.write_text(json.dumps(feed), encoding="utf-8")
+        assert run_scan(store=store, events_url=str(feed_path)) is None
+        assert store.scan_cursor() == cursor
+        assert store.status_summary()["scan"]["last_feed_generated_at"] == next_checked_at
+        assert store.status_summary()["candidates"] == {}
+
+
 def test_failed_archive_recovery_preserves_cursor_then_recovers_all_events(tmp_path, monkeypatch):
     feed_path = _write_feed(tmp_path)
     old_cursor = Cursor(last_seen_event_id="before-window", last_seen_at="2026-05-01T00:00:00+09:00")
