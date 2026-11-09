@@ -14,6 +14,7 @@ from pnu_event_gate.ai import create_ai_client, resolve_ai_runtime
 def probe(provider: str) -> dict:
     runtime = resolve_ai_runtime(provider=provider)
     result = {"provider": provider, "configured": bool(os.environ.get(runtime.api_key_env)),
+              "chat_model": runtime.chat_model, "embedding_model": runtime.embedding_model,
               "chat_ok": False, "embedding_ok": False}
     if not result["configured"]:
         return result
@@ -40,7 +41,11 @@ def probe(provider: str) -> dict:
 
 
 def main() -> int:
-    results = [probe(provider) for provider in ["gemini", "nvidia"]]
+    selected = os.environ.get("PROBE_PROVIDERS", "all")
+    if selected not in {"all", "gemini", "nvidia"}:
+        raise ValueError("unsupported provider selection")
+    providers = ["gemini", "nvidia"] if selected == "all" else [selected]
+    results = [probe(provider) for provider in providers]
     report = {"results": results, "ready_providers": [r["provider"] for r in results if r["chat_ok"] and r["embedding_ok"]]}
     serialized = json.dumps(report, indent=2)
     Path("runtime-probe.json").write_text(serialized + "\n", encoding="utf-8")
