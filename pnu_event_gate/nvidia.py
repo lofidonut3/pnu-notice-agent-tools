@@ -11,7 +11,7 @@ from .ai import AIAPIError, extract_json_object as _extract_json_object, read_en
 
 
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_CHAT_MODEL = "minimaxai/minimax-m3"
+DEFAULT_CHAT_MODEL = "minimaxai/minimax-m3.1-flash"
 DEFAULT_EMBEDDING_MODEL = "nvidia/nemotron-3-embed-1b"
 
 

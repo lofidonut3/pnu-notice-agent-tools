@@ -12,6 +12,15 @@ on:
         type: choice
         options: ["configured", "gemini-3.6-flash", "gemini-3.8-flash"]
         default: "configured"
+      nvidia_chat_model:
+        description: "Verify configured model or the registered multimodal successor"
+        type: choice
+        options: ["configured", "minimaxai/minimax-m3.1-flash"]
+        default: "configured"
+      vision:
+        description: "Check image understanding with a generated red square"
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -23,7 +32,8 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       PROBE_PROVIDERS: ${{ inputs.providers || 'all' }}
       GEMINI_CHAT_MODEL: ${{ inputs.gemini_chat_model != 'configured' && inputs.gemini_chat_model || vars.GEMINI_CHAT_MODEL }}
-      NVIDIA_CHAT_MODEL: ${{ vars.NVIDIA_CHAT_MODEL }}
+      NVIDIA_CHAT_MODEL: ${{ inputs.nvidia_chat_model != 'configured' && inputs.nvidia_chat_model || vars.NVIDIA_CHAT_MODEL }}
+      PROBE_VISION: ${{ inputs.vision && '1' || '0' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
