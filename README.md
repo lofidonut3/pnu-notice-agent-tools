@@ -245,6 +245,11 @@ replacement before changing the production variable. It makes one attempt per
 operation with a synthetic prompt and no user content. The Gemini 3.8 adapter uses
 its documented `low` thinking level; older supported model behavior is retained.
 
+The NVIDIA default is `minimaxai/minimax-m3.1-flash`, the registered multimodal
+successor to the retired M3 endpoint. The 2026-11-09 recovery probe verified actual
+red-image recognition, structured JSON and `nvidia/nemotron-3-embed-1b` embeddings
+with the existing configured credential before selecting it for hosted processing.
+
 ## Web App
 
 `web/` contains the PNU Watch React application. Users authenticate by email and
