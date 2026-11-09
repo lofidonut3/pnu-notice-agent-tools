@@ -29,3 +29,29 @@ def test_client_orders_embedding_vectors_by_index(monkeypatch) -> None:
     )
 
     assert client.embeddings(["first", "second"]) == [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_chat_unwraps_only_a_single_complete_object(monkeypatch):
+    client = NvidiaClient(api_key="test")
+    monkeypatch.setattr(client, "_post_json", lambda *args: {
+        "choices": [{"finish_reason": "stop", "message": {"content": '[{"classification":"not_matched"}]'}}]
+    })
+    assert client.chat_json(messages=[]) == {"classification": "not_matched"}
+
+
+def test_chat_rejects_multiple_alternative_objects(monkeypatch):
+    client = NvidiaClient(api_key="test")
+    monkeypatch.setattr(client, "_post_json", lambda *args: {
+        "choices": [{"finish_reason": "stop", "message": {"content": '[{"ok":true},{"ok":false}]'}}]
+    })
+    with pytest.raises(NvidiaAPIError, match="type=list, length=2"):
+        client.chat_json(messages=[])
+
+
+def test_chat_rejects_truncated_nested_json_before_extracting_inner_objects(monkeypatch):
+    client = NvidiaClient(api_key="test")
+    monkeypatch.setattr(client, "_post_json", lambda *args: {
+        "choices": [{"finish_reason": "length", "message": {"content": '{"facts":[{"text":"partial"}]'}}]
+    })
+    with pytest.raises(NvidiaAPIError, match="truncated"):
+        client.chat_json(messages=[])
