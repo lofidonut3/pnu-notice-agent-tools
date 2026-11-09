@@ -231,6 +231,10 @@ only operational summaries; profiles, recipients, message contents and raw provi
 errors stay out of Actions logs. Missing runtime configuration or processing errors
 fail the run instead of producing a successful skip.
 
+Worker serialization is scoped to the processing job. This keeps job creation and
+runner state observable even while work waits for the previous worker to finish;
+both workers still prevent concurrent processing within their own job group.
+
 GitHub schedules are best effort, so these settings are not an exact 30-minute
 delivery guarantee. Public repositories can also have scheduled workflows disabled
 after 60 days without repository activity. The health workflow records a real,

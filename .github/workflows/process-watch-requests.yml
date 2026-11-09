@@ -10,12 +10,11 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pnu-watch-request-compiler
-  cancel-in-progress: false
-
 jobs:
   process:
+    concurrency:
+      group: pnu-web-request-worker
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
