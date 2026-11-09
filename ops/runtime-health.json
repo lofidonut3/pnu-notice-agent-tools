@@ -1,29 +1,8 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-09T19:10:54.387376+09:00",
-  "status": "unhealthy",
-  "feed_generated_at": "2026-09-26T07:45:59+09:00",
-  "latest_cycle_at": "2026-09-26T16:40:00.300504+09:00",
-  "issues": [
-    {
-      "fingerprint": "feed-scan-stale",
-      "component": "feed",
-      "severity": "critical"
-    },
-    {
-      "fingerprint": "feed-publication-stale",
-      "component": "feed",
-      "severity": "warning"
-    },
-    {
-      "fingerprint": "watch-cycle-stale",
-      "component": "worker",
-      "severity": "critical"
-    },
-    {
-      "fingerprint": "candidate-needs-attention",
-      "component": "analysis",
-      "severity": "warning"
-    }
-  ]
+  "checked_at": "2026-11-09T20:05:50.461903+09:00",
+  "status": "healthy",
+  "feed_generated_at": "2026-11-09T19:09:04+09:00",
+  "latest_cycle_at": "2026-11-09T20:02:19.853055+09:00",
+  "issues": []
 }
