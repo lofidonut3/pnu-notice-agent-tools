@@ -122,6 +122,13 @@ def evaluate_health(
             )
         )
 
+    attention_candidates = int((summary.get("candidates") or {}).get("needs_attention") or 0)
+    if attention_candidates:
+        issues.append(
+            _issue("candidate-needs-attention", "analysis", "warning",
+                   f"재시도 한도에 도달했거나 검토가 필요한 공지 후보가 {attention_candidates}개 있습니다.")
+        )
+
     details = {
         "feed_generated_at": feed_generated.isoformat() if feed_generated else None,
         "last_scan_at": last_checked.isoformat() if last_checked else None,
@@ -129,6 +136,7 @@ def evaluate_health(
         "latest_cycle_status": latest_cycle.get("status") if latest_cycle else None,
         "outbox_needs_attention": needs_attention,
         "failed_watch_requests": failed_requests,
+        "candidates_needing_attention": attention_candidates,
     }
     return issues, details
 

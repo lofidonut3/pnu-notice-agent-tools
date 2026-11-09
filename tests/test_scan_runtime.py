@@ -2,8 +2,36 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import pytest
 
 from pnu_event_gate.cli import main
+from pnu_event_gate.scan import run_scan
+from pnu_event_gate.state import Cursor
+from pnu_event_gate.store import NoticeStore
+
+
+def test_failed_archive_recovery_preserves_cursor_then_recovers_all_events(tmp_path, monkeypatch):
+    feed_path = _write_feed(tmp_path)
+    old_cursor = Cursor(last_seen_event_id="before-window", last_seen_at="2026-05-01T00:00:00+09:00")
+    from pnu_event_gate import scan
+    original = scan.select_archive_events
+    def unavailable(*args):
+        raise OSError("archive response unavailable")
+    with NoticeStore(tmp_path / "recovery.sqlite3") as store:
+        store.update_scan_state(cursor=old_cursor, checked_at="2026-05-01T00:00:00+09:00",
+                                feed_generated_at="2026-05-01T00:00:00+09:00", etag=None,
+                                last_modified=None, status="ok", warnings=[])
+        store.commit()
+        monkeypatch.setattr(scan, "select_archive_events", unavailable)
+        with pytest.raises(RuntimeError, match="existing cursor preserved"):
+            run_scan(store=store, events_url=str(feed_path))
+        assert store.scan_cursor() == old_cursor
+        monkeypatch.setattr(scan, "select_archive_events", original)
+        run_scan(store=store, events_url=str(feed_path))
+        assert store.scan_cursor().last_seen_event_id == "event-academic"
+        runs = store.list_runs()
+        assert any(run["status"] == "failed" for run in runs)
+        assert any(run["status"] == "ok" and run["input_event_count"] == 2 for run in runs)
 
 
 def test_scan_enqueues_matching_candidate_and_advances_cursor(

@@ -94,3 +94,14 @@ def test_monitor_service_notifies_only_new_incidents(tmp_path: Path) -> None:
         assert first["new_incident_count"] >= 2
         assert second["new_incident_count"] == 0
         assert len(sent) == 1
+
+
+def test_monitor_reports_exhausted_or_uncertain_candidates(tmp_path, monkeypatch):
+    with NoticeStore(tmp_path / "state.sqlite3") as store:
+        original = store.status_summary
+        monkeypatch.setattr(store, "status_summary", lambda: {
+            **original(), "candidates": {"needs_attention": 6}
+        })
+        result = monitor_service(store=store, operator_email=None, sender=None,
+                                 checked_at="2026-11-09T18:00:00+09:00")
+        assert any(issue["fingerprint"] == "candidate-needs-attention" for issue in result["issues"])

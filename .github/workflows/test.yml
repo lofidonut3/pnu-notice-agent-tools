@@ -1,0 +1,19 @@
+name: Test
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ["ops/**"]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev,worker]"
+      - run: python -m pytest -q

@@ -96,7 +96,9 @@ def run_scan(
                 warnings = list(selection.warnings)
                 cursor_status = selection.status
             except Exception as error:  # noqa: BLE001 - scan should preserve feed progress info.
-                warnings = [*warnings, f"archive catch-up failed: {error}"]
+                # Do not acknowledge only the recent window and permanently
+                # lose the older events after an interrupted archive recovery.
+                raise RuntimeError("archive catch-up failed; existing cursor preserved") from error
 
         filtered_events = apply_filters(
             selection.events,
