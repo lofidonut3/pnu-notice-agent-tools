@@ -1,0 +1,26 @@
+name: Verify configured AI runtime
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify existing chat and embedding contracts
+        run: python scripts/probe_ai_runtime.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runtime-probe
+          path: runtime-probe.json
+          if-no-files-found: error
+          retention-days: 7
