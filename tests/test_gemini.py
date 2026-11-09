@@ -79,6 +79,18 @@ def test_embeddings_use_batch_retrieval_task_type(monkeypatch) -> None:
     )
 
 
+def test_current_gemini_38_uses_documented_low_thinking_level(monkeypatch):
+    client = GeminiClient(api_key="test")
+    captured = {}
+    def post(path, payload):
+        captured.update(payload)
+        return {"candidates": [{"content": {"parts": [{"text": '{"status":"ok"}'}]}}]}
+    monkeypatch.setattr(client, "_post_json", post)
+    assert client.chat_json(messages=[{"role": "user", "content": "Return JSON."}],
+                            model="gemini-3.8-flash", max_tokens=128, temperature=0.0)["status"] == "ok"
+    assert captured["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+
+
 def test_chat_json_unwraps_one_object_array(monkeypatch) -> None:
     client = GeminiClient(api_key="test")
     monkeypatch.setattr(

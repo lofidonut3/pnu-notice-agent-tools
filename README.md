@@ -203,6 +203,7 @@ connection URI with TLS enabled, and configure these repository secrets:
 | `PNU_SMTP_PASSWORD` | Optional SMTP password |
 
 Optional repository variables are `PNU_AI_PROVIDER` (default `gemini`),
+`GEMINI_CHAT_MODEL` and `NVIDIA_CHAT_MODEL` (provider model overrides),
 `PNU_SMTP_PORT` (default `587`), and `PNU_SMTP_STARTTLS` (default `true`).
 The worker creates and migrates its tables
 on connection. The database role therefore needs schema/table creation and normal
@@ -237,6 +238,12 @@ privacy-safe daily observation in `ops/runtime-health.json` (and earlier when in
 state changes), keeping operations inspectable and the repository active. If the
 entire scheduler stops, re-enable the workflows from Actions and investigate the gap;
 the in-repository monitor is not an independent external availability guarantee.
+
+Use the manual `Verify configured AI runtime` workflow to test existing provider
+credentials against the configured model, or explicitly probe a documented Gemini
+replacement before changing the production variable. It makes one attempt per
+operation with a synthetic prompt and no user content. The Gemini 3.8 adapter uses
+its documented `low` thinking level; older supported model behavior is retained.
 
 ## Web App
 

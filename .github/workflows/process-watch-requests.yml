@@ -23,6 +23,8 @@ jobs:
       PNU_AI_PROVIDER: ${{ vars.PNU_AI_PROVIDER || 'gemini' }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      GEMINI_CHAT_MODEL: ${{ vars.GEMINI_CHAT_MODEL }}
+      NVIDIA_CHAT_MODEL: ${{ vars.NVIDIA_CHAT_MODEL }}
 
     steps:
       - uses: actions/checkout@v6

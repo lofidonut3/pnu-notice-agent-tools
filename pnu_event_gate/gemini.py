@@ -59,7 +59,9 @@ class GeminiClient:
             # constrained extraction/classification tasks, so reserve a small buffer
             # and request minimal reasoning to avoid truncating the JSON response.
             generation_config["maxOutputTokens"] = max_tokens + 1024
-            generation_config["thinkingConfig"] = {"thinkingLevel": "minimal"}
+            # 3.7 routes to 3.8; the current 3.8 contract supports low/medium/high.
+            level = "low" if model_id.startswith(("gemini-3.7", "gemini-3.8")) else "minimal"
+            generation_config["thinkingConfig"] = {"thinkingLevel": level}
         else:
             generation_config["temperature"] = temperature
         payload: dict[str, Any] = {

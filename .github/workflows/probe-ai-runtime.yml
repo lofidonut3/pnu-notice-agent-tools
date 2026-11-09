@@ -1,6 +1,17 @@
 name: Verify configured AI runtime
 on:
   workflow_dispatch:
+    inputs:
+      providers:
+        description: "Existing provider credentials to verify"
+        type: choice
+        options: ["all", "gemini", "nvidia"]
+        default: "all"
+      gemini_chat_model:
+        description: "Verify configured model or a documented replacement before changing production"
+        type: choice
+        options: ["configured", "gemini-3.6-flash", "gemini-3.8-flash"]
+        default: "configured"
 permissions:
   contents: read
 jobs:
@@ -10,6 +21,9 @@ jobs:
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      PROBE_PROVIDERS: ${{ inputs.providers || 'all' }}
+      GEMINI_CHAT_MODEL: ${{ inputs.gemini_chat_model != 'configured' && inputs.gemini_chat_model || vars.GEMINI_CHAT_MODEL }}
+      NVIDIA_CHAT_MODEL: ${{ vars.NVIDIA_CHAT_MODEL }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
