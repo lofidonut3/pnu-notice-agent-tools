@@ -184,8 +184,7 @@ python3 run.py run-watch-cycle \
 
 The workflow at `.github/workflows/process-feed-events.yml` runs on:
 
-- `repository_dispatch` type `pnu-feed-updated` after a successful feed deploy;
-- an hourly fallback schedule at minute 17;
+- scheduled polling at minutes 17 and 47, using the public feed without cross-repository credentials;
 - manual `workflow_dispatch` for bootstrap and diagnostics.
 
 GitHub-hosted runners are ephemeral, so hosted execution must use Postgres rather
@@ -220,11 +219,24 @@ analyze historical events. Use manual `workflow_dispatch` with
 `include_baseline=true` only when intentionally backfilling the current event
 window.
 
-In the feed repository, set `WATCH_DISPATCH_TOKEN` to a token that can create
-repository dispatches in this repository. The feed workflow already defaults
-`WATCH_DISPATCH_REPOSITORY` to `lofidonut3/pnu-notice-agent-tools`; use that
-optional variable only to override the target. A dispatch is only a wake hint;
-the hourly scan and persisted Postgres cursor recover missed or duplicate hints.
+No cross-repository dispatch credential is required. The persisted Postgres cursor
+and monthly archives recover events missed while processing was stopped. If archive
+recovery fails, the cursor stays unchanged so a later retry can recover the full gap.
+Do not reset the cursor or use `include_baseline=true` during normal recovery.
+
+Manual runs support `no_send=true` for processing without SMTP, plus bounded
+`process_limit` and `send_limit` choices for recovery checks. Hosted output contains
+only operational summaries; profiles, recipients, message contents and raw provider
+errors stay out of Actions logs. Missing runtime configuration or processing errors
+fail the run instead of producing a successful skip.
+
+GitHub schedules are best effort, so these settings are not an exact 30-minute
+delivery guarantee. Public repositories can also have scheduled workflows disabled
+after 60 days without repository activity. The health workflow records a real,
+privacy-safe daily observation in `ops/runtime-health.json` (and earlier when incident
+state changes), keeping operations inspectable and the repository active. If the
+entire scheduler stops, re-enable the workflows from Actions and investigate the gap;
+the in-repository monitor is not an independent external availability guarantee.
 
 ## Web App
 
@@ -249,8 +261,10 @@ account to ten enabled watches, and rate-limit repeated compilation requests.
 
 The `Monitor PNU Watch health` workflow runs hourly and checks feed freshness,
 worker freshness, degraded runs, failed requests, and exhausted delivery retries.
-It maintains the dashboard health indicator and sends an operator email only when
-an incident is newly opened or reappears after recovery. Run the same check locally
+It maintains the dashboard health indicator, returns a failing check for unhealthy
+or degraded runtime state, and records the daily operational snapshot. The hosted
+monitor retains `--no-send`; resuming matched notice emails does not enable incident
+email notifications. Run the same check locally
 with:
 
 ```bash

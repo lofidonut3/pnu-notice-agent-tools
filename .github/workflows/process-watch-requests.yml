@@ -4,7 +4,7 @@ on:
   repository_dispatch:
     types: [pnu-watch-requested]
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "3,13,23,33,43,53 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -37,8 +37,9 @@ jobs:
 
       - name: Compile and synchronize web requests
         run: |
-          python run.py process-watch-requests \
+          python scripts/run_hosted.py process-watch-requests \
             --db "$PNU_DATABASE_URL" \
             --provider "$PNU_AI_PROVIDER" \
             --limit 20 \
+            --summary-only --fail-on-error \
             --pretty

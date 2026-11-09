@@ -36,8 +36,50 @@ jobs:
         run: python -m pip install -e ".[worker]"
       - name: Evaluate health without email notifications
         run: |
-          python run.py monitor-service \
+          python scripts/run_hosted.py monitor-service \
             --db "$PNU_DATABASE_URL" \
             --operator-email "$PNU_EMAIL_TO" \
             --no-send \
+            --summary-only --check \
+            --health-report ops/runtime-health.json \
             --pretty
+      - name: Preserve privacy-safe runtime health
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-health
+          path: ops/runtime-health.json
+          if-no-files-found: error
+          retention-days: 7
+
+  record-health:
+    needs: monitor
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/download-artifact@v5
+        with:
+          name: runtime-health
+          path: incoming-health
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Record the daily operational snapshot
+        run: python scripts/record_runtime_health.py incoming-health/runtime-health.json ops/runtime-health.json
+      - name: Commit changed operational health
+        run: |
+          if [[ -z "$(git status --porcelain -- ops/runtime-health.json)" ]]; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ops/runtime-health.json
+          git commit -m "chore: record runtime health"
+          git push

@@ -1,10 +1,8 @@
 name: Process PNU notice events
 
 on:
-  repository_dispatch:
-    types: [pnu-feed-updated]
   schedule:
-    - cron: "17 * * * *"
+    - cron: "17,47 * * * *"
   workflow_dispatch:
     inputs:
       include_baseline:
@@ -12,6 +10,20 @@ on:
         required: false
         type: boolean
         default: false
+      no_send:
+        description: "Process and queue notices without sending email"
+        type: boolean
+        default: false
+      process_limit:
+        description: "Maximum candidates to process in this run"
+        type: choice
+        options: ["1", "5", "20"]
+        default: "20"
+      send_limit:
+        description: "Maximum existing notifications to send in this run"
+        type: choice
+        options: ["1", "5", "20"]
+        default: "20"
 
 permissions:
   contents: read
@@ -36,7 +48,10 @@ jobs:
       PNU_SMTP_USERNAME: ${{ secrets.PNU_SMTP_USERNAME }}
       PNU_SMTP_PASSWORD: ${{ secrets.PNU_SMTP_PASSWORD }}
       PNU_SMTP_STARTTLS: ${{ vars.PNU_SMTP_STARTTLS || 'true' }}
-      EVENTS_URL: ${{ github.event.client_payload.events_url || 'https://lofidonut3.github.io/pnu-public-notice-feed/events.json' }}
+      EVENTS_URL: https://lofidonut3.github.io/pnu-public-notice-feed/events.json
+      PROCESS_LIMIT: ${{ inputs.process_limit || '20' }}
+      SEND_LIMIT: ${{ inputs.send_limit || '20' }}
+      NO_SEND: ${{ inputs.no_send && '1' || '0' }}
 
     steps:
       - uses: actions/checkout@v6
@@ -51,14 +66,14 @@ jobs:
         shell: bash
         run: |
           if [[ -z "$PNU_DATABASE_URL" ]]; then
-            echo "::warning::PNU_DATABASE_URL is not configured; watch processing is skipped."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::PNU_DATABASE_URL is not configured."
+            exit 1
           elif [[ "$PNU_AI_PROVIDER" == "gemini" && -z "$GEMINI_API_KEY" ]]; then
-            echo "::warning::GEMINI_API_KEY is not configured; watch processing is skipped."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::GEMINI_API_KEY is not configured."
+            exit 1
           elif [[ "$PNU_AI_PROVIDER" == "nvidia" && -z "$NVIDIA_API_KEY" ]]; then
-            echo "::warning::NVIDIA_API_KEY is not configured; watch processing is skipped."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::NVIDIA_API_KEY is not configured."
+            exit 1
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -81,12 +96,16 @@ jobs:
           if [[ "${{ inputs.include_baseline || false }}" == "true" ]]; then
             args+=(--include-baseline)
           fi
-          python run.py run-watch-cycle \
+          if [[ "$NO_SEND" == "1" ]]; then
+            args+=(--no-send)
+          fi
+          python scripts/run_hosted.py run-watch-cycle \
             --db "$PNU_DATABASE_URL" \
             --events-url "$EVENTS_URL" \
             --provider "$PNU_AI_PROVIDER" \
-            --process-limit 20 \
-            --send-limit 20 \
+            --process-limit "$PROCESS_LIMIT" \
+            --send-limit "$SEND_LIMIT" \
             --max-attempts 5 \
+            --summary-only --fail-on-error \
             --pretty \
             "${args[@]}"

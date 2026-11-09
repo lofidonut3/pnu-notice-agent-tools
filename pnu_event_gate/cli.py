@@ -48,6 +48,7 @@ from .events import (
 from .evidence import evidence_from_materials, load_evidence_json
 from .matcher import match_event
 from .monitoring import monitor_service
+from .runtime_reporting import cycle_summary, request_summary, health_summary, write_health_report
 from .profiles import load_profile, normalize_profile
 from .scan import run_scan
 from .state import Cursor, EventGateState
@@ -233,6 +234,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Keep due notifications queued without making SMTP calls.",
     )
     cycle.add_argument("--pretty", action="store_true")
+    cycle.add_argument("--summary-only", action="store_true")
+    cycle.add_argument("--fail-on-error", action="store_true")
 
     request_worker = subparsers.add_parser(
         "process-watch-requests",
@@ -242,6 +245,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_ai_args(request_worker, include_embedding=False)
     request_worker.add_argument("--limit", type=int, default=20)
     request_worker.add_argument("--pretty", action="store_true")
+    request_worker.add_argument("--summary-only", action="store_true")
+    request_worker.add_argument("--fail-on-error", action="store_true")
 
     monitor = subparsers.add_parser(
         "monitor-service",
@@ -252,6 +257,9 @@ def _build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--smtp-env-prefix", default="PNU_SMTP_")
     monitor.add_argument("--no-send", action="store_true")
     monitor.add_argument("--pretty", action="store_true")
+    monitor.add_argument("--summary-only", action="store_true")
+    monitor.add_argument("--health-report", type=Path)
+    monitor.add_argument("--check", action="store_true", help="Exit nonzero when service health is not healthy.")
 
     ack = subparsers.add_parser("ack", help="Advance cursor after downstream handling succeeds.")
     _add_common_args(ack)
@@ -737,8 +745,9 @@ def _run_watch_cycle(args: argparse.Namespace) -> int:
             chat_model=runtime.chat_model,
             embedding_model=runtime.embedding_model,
         )
-    _print_json(payload, pretty=args.pretty)
-    return 0
+    summary = cycle_summary(payload)
+    _print_json(summary if args.summary_only else payload, pretty=args.pretty)
+    return 1 if args.fail_on_error and summary["error_count"] else 0
 
 
 def _process_watch_requests(args: argparse.Namespace) -> int:
@@ -754,8 +763,9 @@ def _process_watch_requests(args: argparse.Namespace) -> int:
             chat_model=runtime.chat_model,
             limit=args.limit,
         )
-    _print_json(payload, pretty=args.pretty)
-    return 0
+    summary = request_summary(payload)
+    _print_json(summary if args.summary_only else payload, pretty=args.pretty)
+    return 1 if args.fail_on_error and summary["error_count"] else 0
 
 
 def _monitor_service(args: argparse.Namespace) -> int:
@@ -773,8 +783,10 @@ def _monitor_service(args: argparse.Namespace) -> int:
             operator_email=args.operator_email,
             sender=None if args.no_send else sender,
         )
-    _print_json(payload, pretty=args.pretty)
-    return 0
+    if args.health_report:
+        write_health_report(args.health_report, payload)
+    _print_json(health_summary(payload) if args.summary_only else payload, pretty=args.pretty)
+    return 1 if args.check and payload["status"] != "healthy" else 0
 
 
 def _profile(args: argparse.Namespace) -> int:
