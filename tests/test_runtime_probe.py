@@ -1,4 +1,6 @@
 import json
+from io import BytesIO
+from PIL import Image
 from scripts import probe_ai_runtime as runtime_probe
 
 
@@ -35,3 +37,22 @@ def test_probe_skips_unconfigured_provider(monkeypatch):
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.setattr(runtime_probe, "create_ai_client", lambda _: (_ for _ in ()).throw(AssertionError("unused")))
     assert not runtime_probe.probe("nvidia")["configured"]
+
+
+def test_probe_vision_fixture_is_a_valid_red_png():
+    image = Image.open(BytesIO(runtime_probe.red_square_png()))
+    assert image.size == (64, 64)
+    assert image.getpixel((20, 20)) == (255, 0, 0)
+
+
+def test_vision_probe_requires_correct_image_answer(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-only")
+    class Client:
+        def chat_json(self, **kwargs):
+            assert kwargs["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            return {"color": "red"}
+        def embeddings(self, texts, **kwargs):
+            return [[0.1]]
+    monkeypatch.setattr(runtime_probe, "create_ai_client", lambda _: Client())
+    result = runtime_probe.probe("nvidia", vision=True)
+    assert result["vision_ok"] and result["chat_ok"] and result["embedding_ok"]
