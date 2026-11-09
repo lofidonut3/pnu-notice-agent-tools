@@ -1,50 +1,20 @@
-name: Verify configured AI runtime
+name: Release superseded diagnostic queue
 on:
   workflow_dispatch:
     inputs:
-      providers:
-        description: "Existing provider credentials to verify"
+      legacy_group:
+        description: "Retired group containing only superseded recovery diagnostics"
         type: choice
-        options: ["all", "gemini", "nvidia"]
-        default: "all"
-      gemini_chat_model:
-        description: "Verify configured model or a documented replacement before changing production"
-        type: choice
-        options: ["configured", "gemini-3.6-flash", "gemini-3.8-flash"]
-        default: "configured"
-      nvidia_chat_model:
-        description: "Verify configured model or the registered multimodal successor"
-        type: choice
-        options: ["configured", "minimaxai/minimax-m3.1-flash"]
-        default: "configured"
-      vision:
-        description: "Check image understanding with a generated red square"
-        type: boolean
-        default: false
+        options: ["pnu-notice-watch-runtime", "pnu-watch-request-compiler"]
+        required: true
 permissions:
   contents: read
+concurrency:
+  group: ${{ inputs.legacy_group }}
+  cancel-in-progress: true
 jobs:
-  probe:
+  release:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
-    env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-      PROBE_PROVIDERS: ${{ inputs.providers || 'all' }}
-      GEMINI_CHAT_MODEL: ${{ inputs.gemini_chat_model != 'configured' && inputs.gemini_chat_model || vars.GEMINI_CHAT_MODEL }}
-      NVIDIA_CHAT_MODEL: ${{ inputs.nvidia_chat_model != 'configured' && inputs.nvidia_chat_model || vars.NVIDIA_CHAT_MODEL }}
-      PROBE_VISION: ${{ inputs.vision && '1' || '0' }}
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Verify existing chat and embedding contracts
-        run: python scripts/probe_ai_runtime.py
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: runtime-probe
-          path: runtime-probe.json
-          if-no-files-found: error
-          retention-days: 7
+      - run: echo "Released superseded diagnostic queue; no database or email operation is performed."
