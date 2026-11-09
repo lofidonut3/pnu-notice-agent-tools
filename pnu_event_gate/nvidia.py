@@ -62,14 +62,21 @@ class NvidiaClient:
         }
         response = self._post_json("/chat/completions", payload)
         try:
-            content = response["choices"][0]["message"]["content"]
+            choice = response["choices"][0]
+            if choice.get("finish_reason") == "length":
+                raise NvidiaAPIError("NVIDIA JSON response was truncated at the output limit")
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
             raise NvidiaAPIError("chat response has no message content") from error
         if not isinstance(content, str):
             raise NvidiaAPIError("chat response content is not text")
         parsed = extract_json_object(content)
+        # Match the existing Gemini adapter's conservative wrapper normalization.
+        if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+            parsed = parsed[0]
         if not isinstance(parsed, dict):
-            raise NvidiaAPIError("chat response JSON is not an object")
+            length = len(parsed) if isinstance(parsed, list) else None
+            raise NvidiaAPIError(f"chat response JSON is not an object (type={type(parsed).__name__}, length={length})")
         return parsed
 
     def embeddings(
