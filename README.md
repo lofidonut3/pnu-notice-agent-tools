@@ -243,6 +243,21 @@ state changes), keeping operations inspectable and the repository active. If the
 entire scheduler stops, re-enable the workflows from Actions and investigate the gap;
 the in-repository monitor is not an independent external availability guarantee.
 
+The Supabase schedule backstop checks collection and email processing independently
+every five minutes. It uses GitHub's existing dispatch endpoints when a workflow
+has no recent success or active run. GitHub's own schedules remain available.
+The migration installs both jobs disabled so preview environments do not dispatch
+production workflows. Before enabling the two jobs in production, store a
+fine-grained GitHub token named `pnu_actions_scheduler_token` in Supabase Vault.
+Limit it to the feed and consumer repositories with Actions read and write access.
+After replacing an expired or rejected token, confirm that the jobs resume.
+
+Operators can inspect `pnu_ops.actions_schedule_state` for the most recent check,
+HTTP status, dispatch attempt and accepted run ID, then open that run in GitHub.
+Check `cron.job_run_details` for actual timer executions. Run
+`select pnu_ops.check_actions_schedule('feed', true);` (or `'email'`) to check
+readiness without dispatching. Pause either job from the Supabase Cron dashboard.
+
 Use the manual `Verify configured AI runtime` workflow to test existing provider
 credentials against the configured model, or explicitly probe a documented Gemini
 replacement before changing the production variable. It makes one attempt per
