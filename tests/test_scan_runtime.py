@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 import pytest
 
@@ -78,6 +79,67 @@ def test_scan_limit_does_not_cache_unprocessed_events(tmp_path, monkeypatch):
         run_scan(store=store, events_url=str(feed_path))
         assert store.scan_cursor().last_seen_event_id == "event-academic"
         assert store.http_headers() == {"If-None-Match": '"v1"'}
+
+
+def test_default_scan_recovers_an_unchanged_feed_after_legacy_cache_upgrade(
+    tmp_path, monkeypatch
+):
+    from pnu_event_gate import scan
+
+    db_path = tmp_path / "legacy.sqlite3"
+    feed_path = _write_feed(tmp_path)
+    feed = json.loads(feed_path.read_text(encoding="utf-8"))
+    etag = '"same-feed"'
+    last_modified = "Fri, 05 Jun 2026 03:04:00 GMT"
+    old_cursor = Cursor("event-scholarship", feed["oldest_seen_at"])
+
+    # Build the on-disk DB from the pre-upgrade schema and state, including
+    # validators for a feed whose last event was not yet processed.
+    with sqlite3.connect(db_path) as legacy:
+        legacy.executescript(
+            """
+            create table meta (key text primary key, value text not null);
+            insert into meta values ('schema_version', '3');
+            create table scan_state (
+              id text primary key,
+              last_seen_event_id text,
+              last_seen_at text,
+              last_checked_at text,
+              last_feed_generated_at text,
+              http_etag text,
+              http_last_modified text,
+              last_run_status text,
+              warnings_json text
+            );
+            """
+        )
+        legacy.execute(
+            "insert into scan_state values ('default', ?, ?, ?, ?, ?, ?, 'ok', '[]')",
+            (old_cursor.last_seen_event_id, old_cursor.last_seen_at,
+             feed["generated_at"], feed["generated_at"], etag, last_modified),
+        )
+    legacy.close()
+
+    requests = []
+
+    def fetch(_url, headers):
+        requests.append(headers)
+        if "If-None-Match" in headers or "If-Modified-Since" in headers:
+            return FetchResult(status_code=304, feed=None)
+        return FetchResult(status_code=200, feed=feed, etag=etag, last_modified=last_modified)
+
+    monkeypatch.setattr(scan, "fetch_events_feed", fetch)
+    with NoticeStore(db_path) as store:
+        assert store.scan_cursor() == old_cursor
+        assert store.http_headers() == {}
+        run_scan(store=store, events_url=str(feed_path))
+        assert store.scan_cursor().last_seen_event_id == "event-academic"
+
+    with NoticeStore(db_path) as store:
+        # A second startup leaves the safely acknowledged validators intact.
+        run_scan(store=store, events_url=str(feed_path))
+        assert store.scan_cursor().last_seen_event_id == "event-academic"
+    assert requests == [{}, {"If-None-Match": etag, "If-Modified-Since": last_modified}]
 
 
 def test_scan_enqueues_matching_candidate_and_advances_cursor(

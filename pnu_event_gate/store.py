@@ -222,13 +222,31 @@ class NoticeStore:
 
             """
         )
-        cursor = self._execute(
+        self._execute(
             """
             insert into meta (key, value) values ('schema_version', ?)
             on conflict(key) do update set value = excluded.value
             """,
             (str(SCHEMA_VERSION),),
         )
+        # Older scans could save validators before processing an entire feed.
+        # Clear those validators once, in the same transaction as the marker.
+        cache_upgrade = self._execute(
+            """
+            insert into meta (key, value) values ('scan_http_cache_head_ack_v1', '1')
+            on conflict(key) do nothing
+            returning 1
+            """
+        ).fetchone()
+        if cache_upgrade is not None:
+            self._execute(
+                """
+                update scan_state
+                set http_etag = null, http_last_modified = null
+                where id = 'default'
+                  and (http_etag is not null or http_last_modified is not null)
+                """
+            )
         self.connection.commit()
 
     def _execute(self, query: str, parameters: tuple[Any, ...] = ()) -> Any:
