@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-10T07:43:13.041288+09:00",
+  "checked_at": "2026-11-11T05:36:47.939500+09:00",
   "status": "healthy",
-  "feed_generated_at": "2026-11-10T04:05:11+09:00",
-  "latest_cycle_at": "2026-11-10T06:07:19.361794+09:00",
+  "feed_generated_at": "2026-11-11T05:12:22+09:00",
+  "latest_cycle_at": "2026-11-11T05:19:42.361192+09:00",
   "issues": []
 }
