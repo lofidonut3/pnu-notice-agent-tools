@@ -53,7 +53,9 @@ def run_scan(
         store.commit()
 
     try:
-        result = fetch_events_feed(events_url, store.http_headers())
+        # A legacy scan with a limit may have cached a partially processed
+        # representation. Limited scans must be able to resume it immediately.
+        result = fetch_events_feed(events_url, store.http_headers() if limit is None else {})
         if result.status_code == 304:
             store.update_scan_state(
                 cursor=store.scan_cursor(),
@@ -134,12 +136,13 @@ def run_scan(
             if filtered_events
             else previous_cursor
         )
+        reached_head = next_cursor.last_seen_event_id == result.feed.get("latest_event_id")
         store.update_scan_state(
             cursor=next_cursor,
             checked_at=scanned_at,
             feed_generated_at=feed_checked_at,
-            etag=result.etag,
-            last_modified=result.last_modified,
+            etag=result.etag if reached_head else None,
+            last_modified=result.last_modified if reached_head else None,
             status="ok",
             warnings=warnings,
         )

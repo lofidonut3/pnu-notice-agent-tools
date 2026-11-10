@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from pnu_event_gate.cli import main
+from pnu_event_gate.events import FetchResult
 from pnu_event_gate.scan import run_scan
 from pnu_event_gate.state import Cursor
 from pnu_event_gate.store import NoticeStore
@@ -56,6 +57,27 @@ def test_failed_archive_recovery_preserves_cursor_then_recovers_all_events(tmp_p
         runs = store.list_runs()
         assert any(run["status"] == "failed" for run in runs)
         assert any(run["status"] == "ok" and run["input_event_count"] == 2 for run in runs)
+
+
+def test_scan_limit_does_not_cache_unprocessed_events(tmp_path, monkeypatch):
+    from pnu_event_gate import scan
+
+    feed_path = _write_feed(tmp_path)
+    feed = json.loads(feed_path.read_text(encoding="utf-8"))
+
+    def fetch(_url, headers):
+        if headers.get("If-None-Match") == '"v1"':
+            return FetchResult(status_code=304, feed=None)
+        return FetchResult(status_code=200, feed=feed, etag='"v1"')
+
+    monkeypatch.setattr(scan, "fetch_events_feed", fetch)
+    with NoticeStore(tmp_path / "limited.sqlite3") as store:
+        run_scan(store=store, events_url=str(feed_path), include_baseline=True, limit=1)
+        assert store.scan_cursor().last_seen_event_id == "event-scholarship"
+        assert store.http_headers() == {}
+        run_scan(store=store, events_url=str(feed_path))
+        assert store.scan_cursor().last_seen_event_id == "event-academic"
+        assert store.http_headers() == {"If-None-Match": '"v1"'}
 
 
 def test_scan_enqueues_matching_candidate_and_advances_cursor(

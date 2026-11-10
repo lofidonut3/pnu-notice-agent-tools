@@ -290,10 +290,12 @@ class NoticeStore:
               last_feed_generated_at = coalesce(
                 excluded.last_feed_generated_at, scan_state.last_feed_generated_at
               ),
-              http_etag = coalesce(excluded.http_etag, scan_state.http_etag),
-              http_last_modified = coalesce(
-                excluded.http_last_modified, scan_state.http_last_modified
-              ),
+              http_etag = case when excluded.last_run_status = 'not_modified'
+                then coalesce(excluded.http_etag, scan_state.http_etag)
+                else excluded.http_etag end,
+              http_last_modified = case when excluded.last_run_status = 'not_modified'
+                then coalesce(excluded.http_last_modified, scan_state.http_last_modified)
+                else excluded.http_last_modified end,
               last_run_status = excluded.last_run_status,
               warnings_json = excluded.warnings_json
             """,

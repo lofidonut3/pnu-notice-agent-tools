@@ -40,6 +40,7 @@ class EventGateState:
         etag: str | None,
         last_modified: str | None,
         checked_at: str,
+        latest_event_id: str | None,
     ) -> None:
         self.data = {
             **self.data,
@@ -48,6 +49,7 @@ class EventGateState:
                 **(self.data.get("http_cache") or {}),
                 "etag": etag,
                 "last_modified": last_modified,
+                "latest_event_id": latest_event_id,
             },
         }
 
@@ -66,6 +68,11 @@ class EventGateState:
 
     def http_headers(self) -> dict[str, str]:
         cache = self.data.get("http_cache") or {}
+        # A 304 is safe only once this representation's head is acknowledged.
+        # Older caches have no head association and need one full fetch.
+        acknowledged_id = self.cursor.last_seen_event_id
+        if not acknowledged_id or cache.get("latest_event_id") != acknowledged_id:
+            return {}
         headers: dict[str, str] = {}
         if cache.get("etag"):
             headers["If-None-Match"] = str(cache["etag"])
