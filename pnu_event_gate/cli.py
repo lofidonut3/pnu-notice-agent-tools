@@ -595,6 +595,7 @@ def _check(args: argparse.Namespace) -> int:
         etag=result.etag,
         last_modified=result.last_modified,
         checked_at=checked_at,
+        latest_event_id=result.feed.get("latest_event_id"),
     )
 
     previous_cursor = state.cursor
@@ -616,11 +617,9 @@ def _check(args: argparse.Namespace) -> int:
             selection = select_archive_events(result.feed, args.events_url, previous_cursor)
             warnings = list(selection.warnings)
             cursor_status = selection.status
-        except Exception as error:  # noqa: BLE001 - fall back to current events window.
-            warnings = [
-                *warnings,
-                f"archive catch-up failed: {error}",
-            ]
+        except Exception:  # noqa: BLE001 - leave the acknowledged position untouched.
+            print("archive catch-up failed; existing cursor preserved", file=sys.stderr)
+            return 1
 
     filtered_events = apply_filters(
         selection.events,

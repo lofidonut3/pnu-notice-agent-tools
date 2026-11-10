@@ -594,7 +594,13 @@ The default `check` command does not advance the cursor after printing events.
 This prevents event loss if a downstream agent or automation step fails after
 receiving the batch.
 
-After downstream handling succeeds, advance the cursor with `ack`.
+After downstream handling succeeds, advance the cursor with `ack` using both
+fields from `next_cursor`. A timestamp alone can be shared by multiple events.
+If the exact ID is unavailable, timestamp recovery replays the boundary
+timestamp. Deduplicate any already handled events by `event_id`.
+Conditional requests can return an empty 304 response only after the stored
+cursor reaches the fetched feed's head, so partial or unacknowledged batches
+remain available on the next check.
 
 When duplicate collapse is enabled, some duplicate events can be hidden from the
 output. For that reason, it is safer to ack the payload's `next_cursor` values
@@ -619,16 +625,19 @@ python3 run.py check --advance
   stores only the current feed baseline.
 - `event_id`: `last_seen_event_id` was found in `events.json`; events after it
   were selected.
-- `seen_at`: the event id was not found, but `last_seen_at` was used to select
-  newer events.
-- `archive_event_id`: the local cursor was older than the current `events.json`
-  window, and monthly archives were used to catch up from `last_seen_event_id`.
-- `archive_seen_at`: the local cursor was older than the current `events.json`
-  window, and monthly archives were used to catch up from `last_seen_at`.
-- `archive_required`: the local cursor was older than the current `events.json`
-  window, but archive catch-up was not completed.
+- `seen_at`: the event ID was unavailable. Events at or after `last_seen_at`
+  were selected from the current window.
+- `archive_event_id`: the exact cursor ID was found in the monthly archives.
+- `archive_seen_at`: archive catch-up selected events at or after `last_seen_at`.
+- `archive_stale_cursor`: the ID could not be resolved in the archive and no
+  timestamp is available. Output can include already handled archived events.
+- `archive_required`: the cursor may precede events in the recent window, but
+  archive catch-up was disabled. The returned batch may be incomplete.
 - `stale_cursor`: the event id was not found and `last_seen_at` is unavailable;
   output can include already handled events.
+
+If archive catch-up fails, `check` returns an error and keeps the stored
+cursor and HTTP cache intact so the same gap can be retried.
 
 Disable archive catch-up and inspect only the current `events.json` window:
 

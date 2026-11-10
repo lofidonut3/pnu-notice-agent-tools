@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from pnu_event_gate.cli import main
+from pnu_event_gate.events import FetchResult
 
 
 def test_first_run_sets_baseline_without_output(tmp_path: Path, capsys) -> None:
@@ -278,6 +281,111 @@ def test_archive_required_uses_monthly_archive_catchup(
     assert payload["cursor_status"] == "archive_seen_at"
     assert payload["warnings"] == []
     assert [event["event_id"] for event in payload["events"]] == ["event-2", "event-3"]
+
+
+@pytest.mark.parametrize(
+    ("cursor_id", "has_timestamp", "expected_ids", "status"),
+    [
+        ("event-a", True, ["event-b", "event-c", "event-d"], "archive_event_id"),
+        ("event-a", False, ["event-b", "event-c", "event-d"], "archive_event_id"),
+        (None, True, ["event-a", "event-b", "event-c", "event-d"], "archive_seen_at"),
+    ],
+)
+def test_archive_recovers_equal_timestamp_window_boundary(
+    tmp_path, capsys, cursor_id, has_timestamp, expected_ids, status
+):
+    boundary = "2026-06-05T12:00:00+09:00"
+    events = [
+        _event(f"event-{letter}", "pnu-main-notice", time)
+        for letter, time in zip("abcd", [boundary] * 3 + ["2026-06-05T12:01:00+09:00"])
+    ]
+    # The archive has the exact cursor and its missing same-second successor,
+    # while the recent stream includes a newer event not yet in the archive.
+    feed_path = _write_feed(tmp_path, feed_events=events[2:], archive_events=events[:3])
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"cursor": {
+        "last_seen_event_id": cursor_id,
+        "last_seen_at": boundary if has_timestamp else None,
+    }}), encoding="utf-8")
+    args = ["check", "--events-url", str(feed_path), "--state", str(state_path), "--no-archive"]
+    assert main(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cursor_status"] == status
+    assert [e["event_id"] for e in payload["events"]] == expected_ids
+    if cursor_id is None:
+        assert any("replaying its timestamp" in warning for warning in payload["warnings"])
+    elif has_timestamp:
+        assert main([*args, "--no-archive-catchup"]) == 0
+        current_window = json.loads(capsys.readouterr().out)
+        assert current_window["cursor_status"] == "archive_required"
+        assert [e["event_id"] for e in current_window["events"]] == ["event-c", "event-d"]
+        assert current_window["warnings"]
+
+
+@pytest.mark.parametrize("failure", ["missing", "incomplete"])
+def test_cli_archive_failure_preserves_state_then_retries(tmp_path, capsys, failure):
+    events = _events()
+    feed_path = _write_feed(tmp_path, feed_events=events[1:], archive_events=events)
+    state_path = tmp_path / "state.json"
+    args = ["--events-url", str(feed_path), "--state", str(state_path)]
+    assert main(["ack", *args, "--event-id", "event-1", "--seen-at", events[0]["seen_at"]]) == 0
+    before = state_path.read_bytes()
+    archive = tmp_path / "archive" / "2026-06.json"
+    archived = archive.read_bytes()
+    if failure == "missing":
+        archive.unlink()
+    else:
+        incomplete = json.loads(archived)
+        incomplete["events"] = events[2:]
+        archive.write_text(json.dumps(incomplete), encoding="utf-8")
+    assert main(["check", *args, "--advance"]) == 1
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "existing cursor preserved" in captured.err
+    assert state_path.read_bytes() == before
+
+    archive.write_bytes(archived)
+    assert main(["check", *args, "--advance"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [e["event_id"] for e in payload["events"]] == ["event-2", "event-3"]
+
+
+def test_cli_conditional_fetch_waits_for_acknowledged_head(tmp_path, capsys, monkeypatch):
+    from pnu_event_gate import cli
+
+    feed_path = _write_feed(tmp_path)
+    feed = json.loads(feed_path.read_text(encoding="utf-8"))
+    state_path = tmp_path / "state.json"
+    # An older client may have saved validators before its printed events
+    # were acknowledged.
+    state_path.write_text(json.dumps({
+        "cursor": {"last_seen_event_id": "event-1", "last_seen_at": feed["oldest_seen_at"]},
+        "http_cache": {"etag": '"v1"'},
+    }), encoding="utf-8")
+
+    requests = []
+
+    def fetch(_url, headers):
+        requests.append(headers)
+        if headers.get("If-None-Match") == '"v1"':
+            return FetchResult(status_code=304, feed=None)
+        return FetchResult(status_code=200, feed=feed, etag='"v1"')
+
+    monkeypatch.setattr(cli, "fetch_events_feed", fetch)
+    args = ["--events-url", str(feed_path), "--state", str(state_path)]
+    for _ in range(2):
+        assert main(["check", *args, "--limit", "1"]) == 0
+        batch = json.loads(capsys.readouterr().out)
+        assert batch["events"][0]["event_id"] == "event-2"
+    cursor = batch["next_cursor"]
+    assert main(["ack", *args, "--event-id", cursor["last_seen_event_id"],
+                 "--seen-at", cursor["last_seen_at"]]) == 0
+    assert main(["check", *args, "--limit", "1", "--advance"]) == 0
+    assert json.loads(capsys.readouterr().out)["events"][0]["event_id"] == "event-3"
+    assert main(["check", *args]) == 0
+    assert not capsys.readouterr().out
+    assert requests[-1] == {"If-None-Match": '"v1"'}
+    assert json.loads(state_path.read_text(encoding="utf-8"))["cursor"]["last_seen_event_id"] == "event-3"
 
 
 def _write_feed(

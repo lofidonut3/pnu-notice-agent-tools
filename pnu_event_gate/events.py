@@ -118,22 +118,46 @@ def select_new_events(feed: dict[str, Any], cursor: Cursor) -> CursorSelection:
             if event.get("event_id") == cursor.last_seen_event_id:
                 return CursorSelection(events=events[index + 1 :], status="event_id", warnings=[])
 
+    truncated = feed.get("is_truncated")
+    total_events = feed.get("total_event_count")
+    if truncated is None and isinstance(total_events, int):
+        truncated = total_events > len(events)
+
     if cursor.last_seen_at:
+        # A timestamp alone cannot identify the last acknowledged event in a
+        # batch. Replay that timestamp rather than dropping unacknowledged ties.
         selected = [
             event
             for event in events
-            if str(event.get("seen_at") or "") > cursor.last_seen_at
+            if str(event.get("seen_at") or "") >= cursor.last_seen_at
         ]
-        oldest_seen_at = feed.get("oldest_seen_at")
-        if oldest_seen_at and cursor.last_seen_at < oldest_seen_at:
+        oldest_seen_at = feed.get("oldest_seen_at") or (
+            events[0].get("seen_at") if events else None
+        )
+        before_window = oldest_seen_at and cursor.last_seen_at < oldest_seen_at
+        at_partial_boundary = (
+            cursor.last_seen_at == oldest_seen_at and truncated is not False
+        )
+        if before_window or at_partial_boundary or (not oldest_seen_at and truncated is True):
             return CursorSelection(
                 events=selected,
                 status="archive_required",
                 warnings=[
-                    "local cursor is older than the events.json window; use monthly archive files to avoid missing events",
+                    "local cursor is at or before the events.json window boundary; "
+                    "use monthly archive files to avoid missing events",
                 ],
             )
-        return CursorSelection(events=selected, status="seen_at", warnings=[])
+        return _timestamp_replay(selected, "seen_at", cursor.last_seen_at)
+
+    if truncated is True:
+        return CursorSelection(
+            events=events,
+            status="archive_required",
+            warnings=[
+                "last_seen_event_id was not found in the truncated events.json window "
+                "and last_seen_at is unavailable; look up the event in monthly archives",
+            ],
+        )
 
     return CursorSelection(
         events=events,
@@ -154,20 +178,31 @@ def select_archive_events(
 
     index_url = resolve_related_url(events_url, str(feed.get("index_url") or "./index.json"))
     index = fetch_json_resource(index_url)
-    archive_entries = index.get("archives", {}).get("months", [])
-    archive_events: list[dict[str, Any]] = []
+    archive_entries = index.get("archives", {}).get("months")
+    if not isinstance(archive_entries, list):
+        raise ValueError("feed index has no monthly archive manifest")
+    events_by_id: dict[str, dict[str, Any]] = {}
 
     for entry in archive_entries:
-        if int(entry.get("event_count") or 0) <= 0:
+        expected_count = int(entry.get("event_count") or 0)
+        if expected_count <= 0:
             continue
         archive_url = resolve_related_url(index_url, str(entry.get("url") or ""))
         archive_doc = fetch_json_resource(archive_url)
-        archive_events = [
-            *archive_events,
-            *[compact_event(event) for event in archive_doc.get("events", [])],
-        ]
+        archive_events = archive_doc.get("events")
+        if not isinstance(archive_events, list) or len(archive_events) < expected_count:
+            raise ValueError(f"archive does not contain its advertised events: {archive_url}")
+        for event in archive_events:
+            events_by_id[event["event_id"]] = compact_event(event)
 
-    events = sorted(archive_events, key=event_sort_key)
+    # The manifest can lag the already-read recent stream during deployment.
+    # Keep both snapshots' events and use the recent record for any overlap.
+    for event in feed["events"]:
+        events_by_id[event["event_id"]] = event
+    total_events = feed.get("total_event_count")
+    if isinstance(total_events, int) and len(events_by_id) < total_events:
+        raise ValueError("archives and recent stream do not contain the advertised event count")
+    events = sorted(events_by_id.values(), key=event_sort_key)
     if cursor.last_seen_event_id:
         for index, event in enumerate(events):
             if event.get("event_id") == cursor.last_seen_event_id:
@@ -178,14 +213,14 @@ def select_archive_events(
                 )
 
     if cursor.last_seen_at:
-        return CursorSelection(
-            events=[
+        return _timestamp_replay(
+            [
                 event
                 for event in events
-                if str(event.get("seen_at") or "") > cursor.last_seen_at
+                if str(event.get("seen_at") or "") >= cursor.last_seen_at
             ],
-            status="archive_seen_at",
-            warnings=[],
+            "archive_seen_at",
+            cursor.last_seen_at,
         )
 
     return CursorSelection(
@@ -199,6 +234,18 @@ def select_archive_events(
 
 def event_sort_key(event: dict[str, Any]) -> tuple[str, str]:
     return str(event.get("seen_at") or ""), str(event.get("event_id") or "")
+
+
+def _timestamp_replay(
+    events: list[dict[str, Any]], status: str, cursor_time: str
+) -> CursorSelection:
+    warnings = []
+    if any(event.get("seen_at") == cursor_time for event in events):
+        warnings.append(
+            "exact cursor event was unavailable; replaying its timestamp, "
+            "so deduplicate already handled event IDs"
+        )
+    return CursorSelection(events=events, status=status, warnings=warnings)
 
 
 def apply_filters(
