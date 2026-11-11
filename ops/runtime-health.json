@@ -1,8 +1,19 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-11T05:36:47.939500+09:00",
-  "status": "healthy",
-  "feed_generated_at": "2026-11-11T05:12:22+09:00",
-  "latest_cycle_at": "2026-11-11T05:19:42.361192+09:00",
-  "issues": []
+  "checked_at": "2026-11-12T01:37:11.526677+09:00",
+  "status": "unhealthy",
+  "feed_generated_at": "2026-11-11T22:17:24+09:00",
+  "latest_cycle_at": "2026-11-11T22:44:44.442711+09:00",
+  "issues": [
+    {
+      "fingerprint": "feed-scan-stale",
+      "component": "feed",
+      "severity": "critical"
+    },
+    {
+      "fingerprint": "watch-cycle-stale",
+      "component": "worker",
+      "severity": "critical"
+    }
+  ]
 }
