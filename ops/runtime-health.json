@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-24T05:35:13.613872+09:00",
+  "checked_at": "2026-11-24T13:59:29.662740+09:00",
   "status": "unhealthy",
-  "feed_generated_at": "2026-11-23T19:32:20+09:00",
-  "latest_cycle_at": "2026-11-23T19:54:09.045769+09:00",
+  "feed_generated_at": "2026-11-23T21:52:06+09:00",
+  "latest_cycle_at": "2026-11-24T07:54:07.880429+09:00",
   "issues": [
     {
       "fingerprint": "feed-scan-stale",
@@ -19,6 +19,11 @@
       "fingerprint": "watch-cycle-stale",
       "component": "worker",
       "severity": "critical"
+    },
+    {
+      "fingerprint": "candidate-needs-attention",
+      "component": "analysis",
+      "severity": "warning"
     }
   ]
 }
