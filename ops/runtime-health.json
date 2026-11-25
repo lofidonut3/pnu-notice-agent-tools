@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-25T01:27:33.837355+09:00",
+  "checked_at": "2026-11-26T05:12:34.399632+09:00",
   "status": "unhealthy",
-  "feed_generated_at": "2026-11-24T20:22:20+09:00",
-  "latest_cycle_at": "2026-11-24T20:35:48.064593+09:00",
+  "feed_generated_at": "2026-11-25T16:07:20+09:00",
+  "latest_cycle_at": "2026-11-25T22:02:21.139283+09:00",
   "issues": [
     {
       "fingerprint": "feed-scan-stale",
