@@ -1,24 +1,14 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-26T05:12:34.399632+09:00",
-  "status": "unhealthy",
-  "feed_generated_at": "2026-11-25T16:07:20+09:00",
-  "latest_cycle_at": "2026-11-25T22:02:21.139283+09:00",
+  "checked_at": "2026-11-26T12:08:55.988685+09:00",
+  "status": "degraded",
+  "feed_generated_at": "2026-11-25T23:47:23+09:00",
+  "latest_cycle_at": "2026-11-26T12:04:44.702957+09:00",
   "issues": [
-    {
-      "fingerprint": "feed-scan-stale",
-      "component": "feed",
-      "severity": "critical"
-    },
     {
       "fingerprint": "feed-publication-stale",
       "component": "feed",
       "severity": "warning"
-    },
-    {
-      "fingerprint": "watch-cycle-stale",
-      "component": "worker",
-      "severity": "critical"
     },
     {
       "fingerprint": "candidate-needs-attention",
